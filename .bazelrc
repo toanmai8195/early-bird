@@ -1,0 +1,13 @@
+# Bazel 8 uses Bzlmod by default.
+common --enable_bzlmod
+
+# Build images for linux/amd64 regardless of host (needed for rules_oci).
+build:linux-amd64 --platforms=@rules_go//go/toolchain:linux_amd64
+
+# Java 21 (records, modern syntax).
+build --java_language_version=21 --java_runtime_version=remotejdk_21
+build --tool_java_language_version=21 --tool_java_runtime_version=remotejdk_21
+
+# Quality-of-life
+build --incompatible_strict_action_env
+test --test_output=errors

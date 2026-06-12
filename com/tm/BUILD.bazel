@@ -1,0 +1,4 @@
+# Source root for the monorepo. All Go packages below resolve their import
+# path relative to this prefix, e.g. com/tm/services/server -> github.com/tm/services/server.
+# gazelle:prefix github.com/tm
+# gazelle:exclude loadtest

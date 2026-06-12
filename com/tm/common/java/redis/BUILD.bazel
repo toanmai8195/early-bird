@@ -1,0 +1,20 @@
+load("@rules_java//java:defs.bzl", "java_library", "java_test")
+
+java_library(
+    name = "redis",
+    srcs = ["ClaimGate.java"],
+    visibility = ["//visibility:public"],
+    deps = ["@maven//:io_lettuce_lettuce_core"],
+)
+
+java_test(
+    name = "ClaimGateTest",
+    srcs = ["ClaimGateTest.java"],
+    test_class = "com.tm.common.redis.ClaimGateTest",
+    deps = [
+        ":redis",
+        "@maven//:io_lettuce_lettuce_core",
+        "@maven//:junit_junit",
+        "@maven//:org_mockito_mockito_core",
+    ],
+)

@@ -1,0 +1,25 @@
+load("@rules_java//java:defs.bzl", "java_binary")
+load("//bazel:oci.bzl", "java_service_image")
+
+java_binary(
+    name = "server",
+    srcs = [
+        "BookingVerticle.java",
+        "Main.java",
+    ],
+    main_class = "com.tm.services.server.Main",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//com/tm/common/java/kafka",
+        "//com/tm/common/java/redis",
+        "@maven//:io_vertx_vertx_core",
+        "@maven//:io_vertx_vertx_web",
+    ],
+)
+
+# Builds :server_image and :server_load (distroless/java).
+java_service_image(
+    name = "server",
+    deploy_jar = ":server_deploy.jar",
+    repo_tag = "early-bird/server:latest",
+)

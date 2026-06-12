@@ -1,0 +1,16 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "cmd_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/tm/services/client/cmd",
+    visibility = ["//visibility:private"],
+    deps = ["//com/tm/common/go/result"],
+)
+
+# Local load-generating client; no container image needed.
+go_binary(
+    name = "client",
+    embed = [":cmd_lib"],
+    visibility = ["//visibility:public"],
+)

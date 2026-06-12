@@ -1,0 +1,16 @@
+load("@gazelle//:def.bzl", "gazelle")
+
+# Prefix is declared in com/tm/BUILD.bazel so import paths resolve as
+# github.com/tm/<path under com/tm>, e.g. github.com/tm/services/server.
+gazelle(name = "gazelle")
+
+# Run `bazel run //:gazelle-update-repos` after editing go.mod.
+gazelle(
+    name = "gazelle-update-repos",
+    args = [
+        "-from_file=go.mod",
+        "-to_macro=deps.bzl%go_dependencies",
+        "-prune",
+    ],
+    command = "update-repos",
+)

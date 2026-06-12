@@ -1,0 +1,67 @@
+"""early-bird: high-concurrency booking system (Bazel 8 + Bzlmod).
+
+client = Go; server/manager/common = Java (Vert.x + Kafka + Redis + Postgres).
+"""
+
+module(
+    name = "early_bird",
+    version = "0.1.0",
+)
+
+# --- Go (client only) --------------------------------------------------------
+bazel_dep(name = "rules_go", version = "0.55.1")
+bazel_dep(name = "gazelle", version = "0.44.0")
+bazel_dep(name = "platforms", version = "0.0.11")
+
+# --- Java (server, manager, common) ------------------------------------------
+bazel_dep(name = "rules_java", version = "8.6.1")
+bazel_dep(name = "rules_jvm_external", version = "6.6")
+
+# --- OCI image building ------------------------------------------------------
+bazel_dep(name = "rules_oci", version = "2.2.6")
+bazel_dep(name = "aspect_bazel_lib", version = "2.10.0")
+bazel_dep(name = "rules_pkg", version = "1.0.1")
+
+# Go SDK (pin 1.23.4: rules_go 0.55.1 injects GOEXPERIMENT coverageredesign,
+# rejected by Go 1.25).
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.download(version = "1.23.4")
+
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_mod = "//:go.mod")
+
+# Maven deps for the Java services.
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+maven.install(
+    name = "maven",
+    artifacts = [
+        "io.vertx:vertx-core:4.5.11",
+        "io.vertx:vertx-web:4.5.11",
+        "io.lettuce:lettuce-core:6.5.1.RELEASE",
+        "org.apache.kafka:kafka-clients:3.8.1",
+        "org.postgresql:postgresql:42.7.4",
+        "io.micrometer:micrometer-core:1.13.6",
+        "org.slf4j:slf4j-simple:2.0.16",
+        # test
+        "junit:junit:4.13.2",
+        "org.mockito:mockito-core:5.14.2",
+    ],
+    repositories = ["https://repo1.maven.org/maven2"],
+)
+use_repo(maven, "maven")
+
+# Base images.
+oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
+oci.pull(
+    name = "distroless_static",
+    digest = "sha256:3592aa8171c77482f62bbc4164e6a2d141c6122554ace66e5cc910cadb961ff0",
+    image = "gcr.io/distroless/static",
+    platforms = ["linux/amd64"],
+)
+oci.pull(
+    name = "distroless_java",
+    digest = "sha256:0210d5b77dfbe851916184405ddfc8297e7bc652029f7a485274cb71ea2462bc",
+    image = "gcr.io/distroless/java17-debian12",
+    platforms = ["linux/amd64"],
+)
+use_repo(oci, "distroless_static", "distroless_static_linux_amd64", "distroless_java", "distroless_java_linux_amd64")

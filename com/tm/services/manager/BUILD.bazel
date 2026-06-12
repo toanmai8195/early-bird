@@ -1,0 +1,24 @@
+load("@rules_java//java:defs.bzl", "java_binary")
+load("//bazel:oci.bzl", "java_service_image")
+
+java_binary(
+    name = "manager",
+    srcs = [
+        "ClaimProcessor.java",
+        "Main.java",
+    ],
+    main_class = "com.tm.services.manager.Main",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//com/tm/common/java/kafka",
+        "//com/tm/common/java/pg",
+        "@maven//:org_apache_kafka_kafka_clients",
+    ],
+)
+
+# Builds :manager_image and :manager_load (distroless/java).
+java_service_image(
+    name = "manager",
+    deploy_jar = ":manager_deploy.jar",
+    repo_tag = "early-bird/manager:latest",
+)
