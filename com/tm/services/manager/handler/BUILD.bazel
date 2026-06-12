@@ -1,0 +1,20 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+java_library(
+    name = "handler",
+    srcs = [
+        "ClaimHandler.java",
+        "ClaimHandlerImpl.java",
+    ],
+    visibility = ["//com/tm/services/manager:__subpackages__"],
+    deps = [
+        "//com/tm/common/java/exception",
+        "//com/tm/common/java/kafka",
+        "//com/tm/common/java/metric",
+        "//com/tm/common/java/pg",
+        "//com/tm/common/java/redis",
+        "//com/tm/services/manager/dao",
+        "//tools/dagger",
+        "@maven//:io_vertx_vertx_core",
+    ],
+)

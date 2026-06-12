@@ -23,4 +23,16 @@ public class ClaimEventTest {
         assertEquals("driver-9", e.driverId());
         assertEquals("idem-abc", e.idempotencyKey());
     }
+
+    @Test
+    public void fromJsonRoundTrips() {
+        ClaimEvent original = new ClaimEvent("opp-1", "driver-9", "idem-abc");
+        ClaimEvent parsed = ClaimEvent.fromJson(original.toJson());
+        assertEquals(original, parsed);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void fromJsonRejectsMissingField() {
+        ClaimEvent.fromJson("{\"opportunity_id\":\"opp-1\"}");
+    }
 }

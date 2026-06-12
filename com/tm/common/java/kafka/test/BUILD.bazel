@@ -1,0 +1,37 @@
+load("@rules_java//java:defs.bzl", "java_test")
+
+java_test(
+    name = "ClaimEventTest",
+    srcs = ["ClaimEventTest.java"],
+    test_class = "com.tm.common.kafka.ClaimEventTest",
+    deps = [
+        "//com/tm/common/java/kafka",
+        "@maven//:junit_junit",
+    ],
+)
+
+java_test(
+    name = "ClaimProducerTest",
+    srcs = ["ClaimProducerTest.java"],
+    test_class = "com.tm.common.kafka.ClaimProducerTest",
+    deps = [
+        "//com/tm/common/java/kafka",
+        "@maven//:io_vertx_vertx_core",
+        "@maven//:io_vertx_vertx_kafka_client",
+        "@maven//:junit_junit",
+        "@maven//:org_mockito_mockito_core",
+    ],
+)
+
+java_test(
+    name = "KafkaClientsTest",
+    srcs = ["KafkaClientsTest.java"],
+    test_class = "com.tm.common.kafka.KafkaClientsTest",
+    deps = [
+        "//com/tm/common/java/kafka",
+        "@maven//:io_vertx_vertx_core",
+        "@maven//:io_vertx_vertx_kafka_client",
+        "@maven//:junit_junit",
+        "@maven//:org_apache_kafka_kafka_clients",
+    ],
+)

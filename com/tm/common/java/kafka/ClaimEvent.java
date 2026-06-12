@@ -12,4 +12,29 @@ public record ClaimEvent(String opportunityId, String driverId, String idempoten
                "\",\"driver_id\":\"" + driverId +
                "\",\"idempotency_key\":\"" + idempotencyKey + "\"}";
     }
+
+    /**
+     * Parses the flat JSON produced by {@link #toJson()}. Kept dependency-free
+     * because the schema is small and fully controlled by this codebase.
+     */
+    public static ClaimEvent fromJson(String json) {
+        return new ClaimEvent(
+                field(json, "opportunity_id"),
+                field(json, "driver_id"),
+                field(json, "idempotency_key"));
+    }
+
+    private static String field(String json, String key) {
+        String marker = "\"" + key + "\":\"";
+        int start = json.indexOf(marker);
+        if (start < 0) {
+            throw new IllegalArgumentException("missing field '" + key + "' in: " + json);
+        }
+        start += marker.length();
+        int end = json.indexOf('"', start);
+        if (end < 0) {
+            throw new IllegalArgumentException("unterminated field '" + key + "' in: " + json);
+        }
+        return json.substring(start, end);
+    }
 }

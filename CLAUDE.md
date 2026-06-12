@@ -1,144 +1,94 @@
-# Booking System Design — Delivery Opportunity Claiming
+# Booking System — Delivery Opportunity Claiming
 
-## Bài toán cốt lõi
-Khi 1 booking window mở, rất nhiều driver cùng claim một opportunity có `capacity` giới
-hạn, gần như đồng thời. Đóng khung bài toán: **high contention trên một partition đơn**
-(`opportunity_id`). Toàn bộ thiết kế là cách *thu nhỏ* contention đó.
+## Bài toán
+1 booking window mở → rất nhiều driver claim opportunity có `capacity` giới hạn, gần như
+đồng thời. Đóng khung: **high contention trên một partition đơn** (`opportunity_id`).
+Quy mô giả định: capacity ~1K, ~10K driver/opp; nhiều opp chạy song song.
 
-Quy mô giả định: mỗi opportunity `capacity` ~1K, ~10K driver claim cùng 1 opportunity
-trong cùng thời điểm. Nhiều opportunity chạy song song (chiều dễ — xem mục Scaling).
+Yêu cầu: **(1) No overselling** (booking ≤ capacity), **(2) Low latency** (fast-reject khi
+đầy), **(3) Fault tolerance** (idempotent, at-least-once). `opportunity_id` là partition
+key xuyên suốt Redis → (Kafka) → PG.
 
-Yêu cầu bắt buộc:
-1. **No overselling** — tổng booking thành công cho 1 `opportunity_id` ≤ `capacity`.
-2. **Low latency under heavy concurrency** — fast-reject phần lớn request khi đã đầy.
-3. **Fault tolerance** — đúng khi component fail, request retry, message delivered
-   nhiều lần (idempotency, at-least-once).
+## Kiến trúc & luồng
+Tech: Java+Vert.x (HTTP), Redis+Lua (atomic gate), Kafka (offload), PostgreSQL (source of
+truth), Resilience4j (degrade), MQTT/WS+push (confirm về app).
 
-`opportunity_id` là **partition key xuyên suốt** Redis → (Kafka) → PG.
+Luồng 1 booking attempt:
+1. Vert.x nhận `POST /opportunities/{id}/bookings` (+ `idempotency_key`, `driver_id`).
+2. Redis Lua atomic trên key `claimed_set:{opp}`: `SISMEMBER`→`DUP`; `SCARD>=capacity`→
+   `FULL`; else `SADD`→`OK`. SET vừa đếm vừa dedupe → ~90% reject tại đây, không chạm DB.
+3. `OK` → ghi Redis **pending set** (timestamp+retry) = outbox.
+4. Publish Kafka → response **ACCEPTED** (không phải SUCCESS đồng bộ). Publish fail →
+   reconciliation replay.
+5. Consumer ghi PG: `UNIQUE(opp,driver)` chống double-booking; atomic decrement
+   `remaining-1 WHERE remaining>0` = backstop. Xong → xoá pending + confirm về app.
+6. Reconciliation job quét pending quá `T`s: còn đúng→replay Kafka; hỏng→`failed_bookings`
+   + alert. Idempotent nhờ UNIQUE.
 
-## Tech stack
-- **Java + Vert.x**: HTTP service (non-blocking, chịu concurrency cao).
-- **Redis + Lua**: atomic gate chống oversell + dedupe, fast-reject 90% request.
-- **Kafka**: offload ghi PG bất đồng bộ.
-- **PostgreSQL**: source of truth + backstop chống oversell.
-- **Resilience4j**: rate limit / circuit breaker khi Redis degrade.
-- **MQTT / WebSocket + Push noti**: confirm kết quả về app (online/offline).
+## Nguyên tắc thiết kế
+- **Correctness 2 tầng**: Redis = chống oversell *nhanh* (atomic Lua); PG = chống oversell
+  *đúng* (atomic decrement + UNIQUE). Không tin tuyệt đối vào Redis.
+- **Redis chết**: counter chết → Resilience4j hạ rate limit, vẫn gửi Kafka, **PG là cái
+  giữ correctness** (rate limiter KHÔNG giữ); mất fairness, giữ đúng. claimed_set chết →
+  bỏ dedupe gate, dựa PG UNIQUE.
+- **Kafka partition theo `opportunity_id`** (key = opp): mọi claim cùng opp về 1
+  partition/consumer → manager **group theo opp + bulk-settle 1 statement/opp/poll**.
+  Đánh đổi: opp siêu hot = hot partition (chấp nhận để bulk-load); correctness vẫn do
+  Redis gate + PG quyết, không cần ordering.
+- **Scaling**: các opp độc lập, không global lock (Redis 1 key/opp, PG row/opp). Lo còn
+  lại: Redis hot-slot (1 key/node) — Lua single-key ~100K ops/s vẫn thừa; nếu cần shard 1
+  opp thành N sub-counter. Hot partition Kafka → tăng số partition.
 
-## Luồng request (booking attempt)
-1. **Vert.x** nhận `POST /opportunities/{id}/bookings` (kèm `idempotency_key`,
-   `driver_id`). Đã auth trước.
-2. **Redis Lua (atomic)** trên 1 key `claimed_set:{opp_id}`:
-   - `SISMEMBER` → đã claim ⇒ trả `DUP` (idempotent, không tốn slot).
-   - `SCARD >= capacity` ⇒ trả `FULL` (fast-reject).
-   - else `SADD driver_id` ⇒ `OK`. Dùng SET để vừa đếm vừa dedupe trong 1 op.
-   → ~90% request bị loại ngay tại đây, không chạm DB.
-3. Request `OK`: ghi vào **Redis pending set** (kèm timestamp + retry count) →
-   pending set đóng vai trò **outbox**.
-4. Publish **Kafka** rồi response **ACCEPTED** cho user (không phải SUCCESS đồng bộ).
-   Nếu Kafka publish fail → reconciliation job replay từ pending set.
-5. **Consumer** ghi **PG**:
-   - `UNIQUE(opportunity_id, driver_id)` chống double-booking khi Kafka deliver lại.
-   - Atomic decrement `UPDATE ... SET remaining = remaining-1 WHERE id=? AND
-     remaining > 0` — backstop cuối cùng chống oversell.
-   - Ghi xong ⇒ remove khỏi Redis pending set, publish confirm cho app
-     (MQTT/WebSocket nếu online, push noti nếu offline).
-6. **Reconciliation job** định kỳ quét pending set: entry quá `T` giây chưa được xoá
-   ⇒ còn slot/đúng thì replay Kafka; hỏng thật thì ghi bảng `failed_bookings` + alert.
-   Job phải idempotent (dựa UNIQUE constraint ở mục 5).
-
-## Correctness under concurrency
-- **Redis** = lớp chống oversell *nhanh* (atomic single-key Lua).
-- **PG** = lớp chống oversell *đúng* (atomic decrement + UNIQUE). Không tin tuyệt đối
-  vào Redis.
-- **Idempotency** xử lý ở 2 tầng: Redis `claimed_set` (gate) + PG UNIQUE (backstop).
-
-## Failure handling
-- **Kafka/step sau fail**: pending set (outbox) + reconciliation job hậu kiểm.
-- **Redis counter chết**:
-  - Resilience4j hạ rate limit theo số pod để PG không sập, vẫn gửi Kafka.
-  - ⚠️ Rate limiter KHÔNG giữ correctness — lúc này **PG atomic decrement mới là cái
-    chống oversell**. Tradeoff: mất fairness (driver bấm sau có thể claim trước),
-    correctness vẫn giữ.
-- **Redis record (claimed_set) chết**: bỏ dedupe ở gate, dựa hoàn toàn vào PG UNIQUE.
-  Response bình thường, hậu kiểm sau.
-
-## Kafka partitioning (đã cân nhắc)
-- Correctness đã chốt ở Redis ⇒ **không cần ordering** ⇒ **không partition theo
-  opportunity_id**.
-- Chọn **partition trải đều (round-robin / driver_id)** → tối đa throughput consumer,
-  tránh hot partition (opp siêu hot dồn 1 partition = mất song song).
-- Message tự chứa đủ `{opportunity_id, driver_id, idempotency_key}` nên consumer nào
-  xử lý cũng được.
-- *Alternative đã loại*: partition theo opportunity_id để dùng Kafka serialize capacity
-  thay Redis — thừa vì đã có Redis gate, lại gây hot partition.
-
-## Scaling (nhiều opportunity_id — chiều dễ)
-Các opportunity độc lập → scale ngang tự nhiên, không global lock:
-| Tầng | Partition | Contention |
-|------|-----------|------------|
-| Redis | 1 key/opp | nội bộ 1 opp |
-| Kafka | round-robin | — |
-| PG | row/opp | row cùng opp |
-
-Cảnh báo còn lại:
-- **Redis hot-slot**: 1 key không split across node. Lua single-key ~100K+ ops/s ⇒
-  10K vẫn thừa. Nếu cần: shard 1 opp thành N sub-counter (capacity chia N) — alternative.
-
-## Ngôn ngữ
-- **client = Go** (load-gen).
-- **server / manager / common = Java** (Vert.x, Kafka client, Lettuce/Redis, JDBC/PG,
-  Micrometer).
-
-## Cấu trúc repo (Bazel 8 + Bzlmod + rules_oci)
+## Ngôn ngữ & cấu trúc (Bazel 8 + Bzlmod + rules_oci)
+- **client = Go**; **server / manager / common = Java** (Vert.x, vertx-redis-client,
+  vertx-kafka-client, kafka-clients, JDBC, Micrometer, Dagger).
+- **server fully non-blocking** trên Vert.x event loop: gate + producer trả `Future`,
+  KHÔNG `executeBlocking`. **manager sync có chủ đích** (Kafka poll + JDBC là
+  throughput-bound; tối ưu bằng **batch settle 1 tx/poll** + nhiều partition, không phải
+  event loop). Settle giữ `remaining` chính xác: per-claim CTE (decrement có khoá +
+  dedup rồi mới insert), group/sort theo opportunity_id tránh deadlock.
 ```
-MODULE.bazel / .bazelversion(8.1.1) / .bazelrc   # rules_go, gazelle, rules_java, rules_jvm_external, rules_oci, rules_pkg
-go.mod                                           # module github.com/tm (chỉ cho client Go; gazelle prefix ở com/tm)
-bazel/oci.bzl                                    # go_service_image (distroless/static) + java_service_image (distroless/java)
-com/tm/                                           # source root
-  infra/                  # docker-compose (redis/kafka/pg) + k8s/migrations (placeholder), TÁCH RIÊNG
+MODULE.bazel/.bazelversion(8.1.1)/.bazelrc   # rules_go, gazelle, rules_java, rules_jvm_external, rules_oci, rules_pkg
+go.mod                                       # module github.com/tm (client Go; gazelle prefix ở com/tm)
+bazel/oci.bzl                                # go_service_image + java_service_image
+tools/dagger/                                # java_plugin(dagger-compiler) + export dagger+javax.inject
+com/tm/
+  infra/                  # docker-compose (redis/kafka/pg), grafana/dashboards/<svc>.json
   services/
-    client/cmd  (Go)      # load-gen client bắn concurrent claim
-    server/     (Java)    # Vert.x: nhận request, Redis Lua gate reject sớm → Kafka → 202 ACCEPTED
-    manager/    (Java)    # nghe Kafka, commit claim vào PG (source of truth + backstop), notify app
-  common/                 # thư viện chung, TÁCH JAVA / GO
-    java/                 #   redis (ClaimGate+Lua), kafka, pg (ClaimStore), metric
-    go/result/            #   claim Outcome + Tally (client dùng)
-  loadtest/               # kết quả loadtest: redis-counter/, pg/
+    client/cmd  (Go)      # load-gen
+    server/     (Java)    # Vert.x gate → Kafka → 202 ACCEPTED
+    manager/    (Java)    # Kafka consumer → PG; Main+ConsumerRunner, di/, config/, dao/, handler/
+  common/                 # TÁCH java/ và go/; mỗi class có interface + impl (vd ClaimStore/PgClaimStore)
+    java/                 #   config, redis, kafka, pg, metric, exception (custom exceptions chung)
+    go/result/            #   Outcome + Tally
+  loadtest/               # redis-counter/, pg/
 ```
-Java package = `com.tm.services.server`, `com.tm.common.redis` (Bazel không bắt path khớp
-package nên file để dưới `common/java/redis` vẫn giữ package `com.tm.common.redis`).
-Go import = `github.com/tm/common/go/result`, `github.com/tm/services/client/cmd`.
+- Java package = path (`com.tm.services.server`, `com.tm.common.redis`). Go import =
+  `github.com/tm/...`. Bazel không bắt path khớp Java package.
+- Mỗi target có **test ở subfolder `test/`** (BUILD riêng).
+- DI: constructor `@Inject` cho class mình sở hữu; `ManagerModule` (@Provides) chỉ external;
+  `ManagerBindings` (@Binds) bind interface→impl.
 
-### Build commands
+## Build / test
 ```bash
-bazel build //com/tm/services/client/cmd:client \
-            //com/tm/services/server:server //com/tm/services/manager:manager   # code
-bazel build --config=linux-amd64 //com/tm/services/server:server_image          # OCI image
-bazel run   --config=linux-amd64 //com/tm/services/server:server_load           # + load vào docker
-bazel run   //com/tm/services/client/cmd:client -- --drivers=10000
+bazel build //com/tm/services/{client/cmd:client,server:server,manager:manager}   # code
+bazel build //com/tm/services/server:server_image                                 # OCI image (native arch)
+bazel run   //com/tm/services/manager:manager_load                                # + load docker
+bazel test  --build_tests_only //com/tm/common/... //com/tm/services/...           # tests
 ```
-Lưu ý cấu hình đã sửa khi dựng (tất cả build pass):
-- Go SDK pin **1.23.4** (rules_go 0.55.1 inject GOEXPERIMENT `coverageredesign`, Go 1.25 reject).
-- `.bazelrc` set **Java 21** (`--java_language_version=21`) để dùng record.
-- Base image multi-platform → build image PHẢI kèm `--config=linux-amd64` (pin
-  `//command_line_option:platforms` về linux/amd64).
-- Digest base image (`distroless_static`, `distroless_java`) trong MODULE.bazel đã là
-  digest thật.
-- Code hiện là skeleton (TODO wiring config/env) — compile + deploy jar + OCI image OK.
+Lưu ý: Go SDK pin **1.23.4** (rules_go 0.55.1 inject GOEXPERIMENT `coverageredesign`, Go
+1.25 reject); `.bazelrc` set **Java 21** (record); base image pull **multi-arch**
+(amd64+arm64/v8) nên image build native trên mac arm64 (không cần `--config`); muốn ép
+amd64 cho prod thì thêm `--config=linux-amd64`; digest base trong MODULE.bazel đã là digest thật.
 
-## Quy tắc theo path
-Rule scoped bằng `.claude/rules/` (load khi Claude đụng file khớp path):
-- `com/tm/common/**` → mọi target phải có unit test. Xem
-  [.claude/rules/common-unit-tests.md](.claude/rules/common-unit-tests.md).
-- `com/tm/services/**`, `com/tm/common/java/{kafka,pg}/**` → API / consumer / producer /
-  DAO phải có metric counter (+ latency P99 cho API & DAO). Xem
-  [.claude/rules/observability-metrics.md](.claude/rules/observability-metrics.md).
+## Rules (path-scoped, lazy-load trong `.claude/rules/`)
+Chỉ nạp khi đụng file khớp path — index để biết trước:
+- **unit test** — mọi target `common/**` + mọi `services/**/{dao,handler}` có test (subfolder `test/`).
+- **observability** — API/consumer/producer/dao có metric counter (+ latency P99 cho API & dao).
+- **grafana** — mỗi metric có panel; mỗi service / common-stack có metric = 1 dashboard.
+- **interface** — mọi dao/handler/common (có hành vi) expose qua interface (`@Binds`); DTO miễn.
 
-## Output cần tạo
-Design document (~2-5 trang, Markdown + Mermaid), gồm:
-1. High-level architecture diagram.
-2. Request flow cho 1 booking attempt (happy path + reject khi full).
-3. Correctness under concurrency.
-4. Failure & retry handling.
-5. Tradeoffs & alternatives (sync SUCCESS vs async ACCEPTED, Redis gate vs Kafka
-   serialize, Kafka partition strategy, Redis degrade modes).
+## Deliverable
+Design doc (~2-5 trang, Markdown + Mermaid): architecture diagram, request flow, correctness
+under concurrency, failure/retry, tradeoffs (sync vs async ACCEPTED, Redis gate vs Kafka
+serialize, partition strategy, Redis degrade).

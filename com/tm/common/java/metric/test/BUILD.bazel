@@ -1,0 +1,12 @@
+load("@rules_java//java:defs.bzl", "java_test")
+
+java_test(
+    name = "MetricsTest",
+    srcs = ["MetricsTest.java"],
+    test_class = "com.tm.common.metric.MetricsTest",
+    deps = [
+        "//com/tm/common/java/metric",
+        "@maven//:io_micrometer_micrometer_core",
+        "@maven//:junit_junit",
+    ],
+)

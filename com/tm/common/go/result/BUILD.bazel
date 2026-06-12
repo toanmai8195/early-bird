@@ -1,14 +1,8 @@
-load("@rules_go//go:def.bzl", "go_library", "go_test")
+load("@rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "result",
     srcs = ["result.go"],
     importpath = "github.com/tm/common/go/result",
     visibility = ["//visibility:public"],
-)
-
-go_test(
-    name = "result_test",
-    srcs = ["result_test.go"],
-    embed = [":result"],
 )

@@ -1,0 +1,11 @@
+load("@rules_java//java:defs.bzl", "java_test")
+
+java_test(
+    name = "HandlerExceptionTest",
+    srcs = ["HandlerExceptionTest.java"],
+    test_class = "com.tm.common.exception.HandlerExceptionTest",
+    deps = [
+        "//com/tm/common/java/exception",
+        "@maven//:junit_junit",
+    ],
+)

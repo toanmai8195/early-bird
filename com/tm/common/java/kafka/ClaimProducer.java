@@ -1,21 +1,16 @@
 package com.tm.common.kafka;
 
-import org.apache.kafka.clients.producer.Producer;
-import org.apache.kafka.clients.producer.ProducerRecord;
+import io.vertx.core.Future;
 
-/** Publishes claim events to Kafka (round-robin partitioning, key = null). */
-public final class ClaimProducer {
+/**
+ * Publishes claim events to Kafka, keyed by opportunity_id so all claims for one
+ * opportunity land on the same partition (enables grouped bulk-settle in the
+ * manager). Non-blocking: returns a {@link Future} so the server can publish on
+ * the event loop without blocking.
+ */
+public interface ClaimProducer {
 
-    public static final String TOPIC = "claim-events";
+    String TOPIC = "claim-events";
 
-    private final Producer<String, String> producer;
-
-    public ClaimProducer(Producer<String, String> producer) {
-        this.producer = producer;
-    }
-
-    public void publish(ClaimEvent event) {
-        // key = null -> round-robin partitioner spreads load, avoids hot partition.
-        producer.send(new ProducerRecord<>(TOPIC, null, event.toJson()));
-    }
+    Future<Void> publish(ClaimEvent event);
 }

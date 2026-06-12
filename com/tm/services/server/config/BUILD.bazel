@@ -1,0 +1,8 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+java_library(
+    name = "config",
+    srcs = ["ServerConfig.java"],
+    visibility = ["//com/tm/services/server:__subpackages__"],
+    deps = ["//com/tm/common/java/config"],
+)

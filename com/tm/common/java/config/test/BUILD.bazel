@@ -1,0 +1,11 @@
+load("@rules_java//java:defs.bzl", "java_test")
+
+java_test(
+    name = "ConfigTest",
+    srcs = ["ConfigTest.java"],
+    test_class = "com.tm.common.config.ConfigTest",
+    deps = [
+        "//com/tm/common/java/config",
+        "@maven//:junit_junit",
+    ],
+)

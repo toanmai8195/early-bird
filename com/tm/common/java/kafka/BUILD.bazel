@@ -1,32 +1,18 @@
-load("@rules_java//java:defs.bzl", "java_library", "java_test")
+load("@rules_java//java:defs.bzl", "java_library")
 
 java_library(
     name = "kafka",
     srcs = [
         "ClaimEvent.java",
         "ClaimProducer.java",
+        "KafkaClients.java",
+        "VertxClaimProducer.java",
     ],
     visibility = ["//visibility:public"],
-    deps = ["@maven//:org_apache_kafka_kafka_clients"],
-)
-
-java_test(
-    name = "ClaimEventTest",
-    srcs = ["ClaimEventTest.java"],
-    test_class = "com.tm.common.kafka.ClaimEventTest",
     deps = [
-        ":kafka",
-        "@maven//:junit_junit",
-    ],
-)
-
-java_test(
-    name = "ClaimProducerTest",
-    srcs = ["ClaimProducerTest.java"],
-    test_class = "com.tm.common.kafka.ClaimProducerTest",
-    deps = [
-        ":kafka",
-        "@maven//:junit_junit",
+        "//tools/dagger",
+        "@maven//:io_vertx_vertx_core",
+        "@maven//:io_vertx_vertx_kafka_client",
         "@maven//:org_apache_kafka_kafka_clients",
     ],
 )

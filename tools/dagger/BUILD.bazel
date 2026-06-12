@@ -1,0 +1,21 @@
+load("@rules_java//java:defs.bzl", "java_library", "java_plugin")
+
+# Dagger annotation processor + runtime, wired as a single dep target
+# (mirrors hulk's //tools/plugins:dagger). Depend on //tools/dagger:dagger and
+# add `plugins = [...]` is not needed — exported_plugins applies it transitively.
+java_plugin(
+    name = "dagger_plugin",
+    generates_api = True,
+    processor_class = "dagger.internal.codegen.ComponentProcessor",
+    deps = ["@maven//:com_google_dagger_dagger_compiler"],
+)
+
+java_library(
+    name = "dagger",
+    exported_plugins = [":dagger_plugin"],
+    visibility = ["//visibility:public"],
+    exports = [
+        "@maven//:com_google_dagger_dagger",
+        "@maven//:javax_inject_javax_inject",
+    ],
+)

@@ -1,19 +1,14 @@
-load("@rules_java//java:defs.bzl", "java_library", "java_test")
+load("@rules_java//java:defs.bzl", "java_library")
 
 java_library(
     name = "metric",
-    srcs = ["Metrics.java"],
+    srcs = [
+        "Metrics.java",
+        "MicrometerMetrics.java",
+    ],
     visibility = ["//visibility:public"],
-    deps = ["@maven//:io_micrometer_micrometer_core"],
-)
-
-java_test(
-    name = "MetricsTest",
-    srcs = ["MetricsTest.java"],
-    test_class = "com.tm.common.metric.MetricsTest",
     deps = [
-        ":metric",
+        "//tools/dagger",
         "@maven//:io_micrometer_micrometer_core",
-        "@maven//:junit_junit",
     ],
 )

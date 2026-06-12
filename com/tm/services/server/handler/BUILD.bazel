@@ -1,0 +1,24 @@
+load("@rules_java//java:defs.bzl", "java_library")
+
+java_library(
+    name = "handler",
+    srcs = [
+        "ClaimHandler.java",
+        "ClaimHandlerImpl.java",
+        "OpportunityHandler.java",
+        "OpportunityHandlerImpl.java",
+    ],
+    visibility = ["//com/tm/services/server:__subpackages__"],
+    deps = [
+        "//com/tm/common/java/kafka",
+        "//com/tm/common/java/metric",
+        "//com/tm/common/java/redis",
+        "//com/tm/services/server/dao",
+        "//tools/dagger",
+        "@maven//:io_github_resilience4j_resilience4j_circuitbreaker",
+        "@maven//:io_github_resilience4j_resilience4j_ratelimiter",
+        "@maven//:io_micrometer_micrometer_core",
+        "@maven//:io_vertx_vertx_core",
+        "@maven//:io_vertx_vertx_web",
+    ],
+)

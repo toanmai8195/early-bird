@@ -1,28 +1,32 @@
-package result
+package result_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tm/common/go/result"
+)
 
 func TestFromStatus(t *testing.T) {
-	cases := map[int]Outcome{
-		200: Accepted,
-		202: Accepted,
-		409: Full,
-		500: Unavail,
-		0:   Unavail,
+	cases := map[int]result.Outcome{
+		200: result.Accepted,
+		202: result.Accepted,
+		409: result.Full,
+		500: result.Unavail,
+		0:   result.Unavail,
 	}
 	for code, want := range cases {
-		if got := FromStatus(code); got != want {
+		if got := result.FromStatus(code); got != want {
 			t.Errorf("FromStatus(%d) = %q, want %q", code, got, want)
 		}
 	}
 }
 
 func TestTallyAdd(t *testing.T) {
-	var tally Tally
-	tally.Add(Accepted)
-	tally.Add(Accepted)
-	tally.Add(Full)
-	tally.Add(Unavail)
+	var tally result.Tally
+	tally.Add(result.Accepted)
+	tally.Add(result.Accepted)
+	tally.Add(result.Full)
+	tally.Add(result.Unavail)
 	tally.Add("garbage") // unknown -> Unavail bucket
 
 	if tally.Accepted != 2 {

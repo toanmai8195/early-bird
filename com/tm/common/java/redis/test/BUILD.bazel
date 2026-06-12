@@ -1,0 +1,14 @@
+load("@rules_java//java:defs.bzl", "java_test")
+
+java_test(
+    name = "ClaimGateTest",
+    srcs = ["ClaimGateTest.java"],
+    test_class = "com.tm.common.redis.ClaimGateTest",
+    deps = [
+        "//com/tm/common/java/redis",
+        "@maven//:io_vertx_vertx_core",
+        "@maven//:io_vertx_vertx_redis_client",
+        "@maven//:junit_junit",
+        "@maven//:org_mockito_mockito_core",
+    ],
+)

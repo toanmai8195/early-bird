@@ -1,0 +1,17 @@
+load("@rules_java//java:defs.bzl", "java_test")
+
+java_test(
+    name = "RedisWarmupServiceImplTest",
+    srcs = ["RedisWarmupServiceImplTest.java"],
+    test_class = "com.tm.services.server.redis.RedisWarmupServiceImplTest",
+    deps = [
+        "//com/tm/common/java/metric",
+        "//com/tm/services/server/dao",
+        "//com/tm/services/server/redis",
+        "@maven//:io_micrometer_micrometer_core",
+        "@maven//:io_vertx_vertx_core",
+        "@maven//:io_vertx_vertx_redis_client",
+        "@maven//:junit_junit",
+        "@maven//:org_mockito_mockito_core",
+    ],
+)
