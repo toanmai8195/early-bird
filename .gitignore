@@ -1,0 +1,22 @@
+# Bazel convenience symlinks + output base
+/bazel-*
+bazel-bin
+bazel-out
+bazel-testlogs
+bazel-early-bird
+
+# Bazel user-specific config
+user.bazelrc
+.bazelrc.user
+
+# rules_jvm_external pinned lock (regenerate locally if unpinned)
+# maven_install.json
+
+# Go
+/com/tm/services/client/cmd/client
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
