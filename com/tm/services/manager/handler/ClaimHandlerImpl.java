@@ -97,8 +97,11 @@ public final class ClaimHandlerImpl implements ClaimHandler {
 
     /**
      * Runs as soon as this opportunity settles, independent of the rest of the batch.
-     * REJECTED and DUPLICATE never consumed (or already held) a Redis slot via this
-     * event, so release each back to keep Redis consistent with PG.
+     * REJECTED: driver passed the Redis gate (SADD) but PG had remaining=0 — call
+     * reject() to close the slot permanently (SREM + capacity-1) so the gate returns
+     * FULL without admitting a replacement driver that PG would reject again.
+     * DUPLICATE: Kafka replay of an already-committed booking — driver is still in
+     * claimed_set from the original OK, SCARD is correct, no Redis action needed.
      */
     private void onSettled(List<ClaimEvent> events, List<ClaimStore.Outcome> outcomes) {
         for (int i = 0; i < events.size(); i++) {
@@ -114,8 +117,8 @@ public final class ClaimHandlerImpl implements ClaimHandler {
             }
             notify(status);
 
-            if (o == ClaimStore.Outcome.REJECTED || o == ClaimStore.Outcome.DUPLICATE) {
-                gate.release(e.opportunityId(), e.driverId())
+            if (o == ClaimStore.Outcome.REJECTED) {
+                gate.reject(e.opportunityId(), e.driverId())
                         .onSuccess(v -> metrics.counter(RELEASE_METRIC, "ok").increment())
                         .onFailure(err -> metrics.counter(RELEASE_METRIC, "error").increment());
             }

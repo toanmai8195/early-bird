@@ -51,6 +51,24 @@ public class ClaimGateTest {
     }
 
     @Test
+    public void rejectRemovesDriverAndDecrementsCapacity() {
+        RedisAPI redis = Mockito.mock(RedisAPI.class);
+        when(redis.srem(any())).thenReturn(Future.succeededFuture(Mockito.mock(Response.class)));
+        when(redis.hincrby(Mockito.anyString(), Mockito.anyString(), Mockito.anyString()))
+                .thenReturn(Future.succeededFuture(Mockito.mock(Response.class)));
+
+        new VertxClaimGate(redis).reject("opp-42", "driver-7").result();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> sremArgs = ArgumentCaptor.forClass(List.class);
+        Mockito.verify(redis).srem(sremArgs.capture());
+        assertEquals("claimed_set:opp-42", sremArgs.getValue().get(0));
+        assertEquals("driver-7", sremArgs.getValue().get(1));
+
+        Mockito.verify(redis).hincrby("opp_meta:opp-42", "capacity", "-1");
+    }
+
+    @Test
     public void evalUsesPerOpportunityClaimedSetAndMetaKeys() {
         RedisAPI redis = redisReturning("OK");
         new VertxClaimGate(redis).claim("opp-42", "driver-7").result();

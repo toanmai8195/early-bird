@@ -38,6 +38,7 @@ public class ClaimHandlerTest {
         dao = Mockito.mock(BookingDao.class);
         gate = Mockito.mock(ClaimGate.class);
         when(gate.release(Mockito.any(), Mockito.any())).thenReturn(Future.succeededFuture());
+        when(gate.reject(Mockito.any(), Mockito.any())).thenReturn(Future.succeededFuture());
     }
 
     @Test
@@ -141,7 +142,7 @@ public class ClaimHandlerTest {
     }
 
     @Test
-    public void settledDuplicateAndRejectedReleaseRedisClaim() {
+    public void committedLeavesRedisSlotIntact() {
         when(dao.settleOpportunity("opp-1", batch)).thenReturn(Future.succeededFuture(List.of(
                 ClaimStore.Outcome.COMMITTED,
                 ClaimStore.Outcome.DUPLICATE,
@@ -149,10 +150,16 @@ public class ClaimHandlerTest {
 
         new ClaimHandlerImpl(dao, gate, metrics).handleBatch(batch);
 
+        // COMMITTED: slot stays (driver permanently holds it)
         verify(gate, times(0)).release("opp-1", "d1");
-        verify(gate, times(1)).release("opp-1", "d2");
-        verify(gate, times(1)).release("opp-1", "d3");
-        assertGaugeReleaseCounter("ok", 2.0);
+        verify(gate, times(0)).reject("opp-1", "d1");
+        // DUPLICATE: Kafka replay, already committed — no gate action
+        verify(gate, times(0)).release("opp-1", "d2");
+        verify(gate, times(0)).reject("opp-1", "d2");
+        // REJECTED: remove from set AND decrement capacity so gate returns FULL
+        verify(gate, times(0)).release("opp-1", "d3");
+        verify(gate, times(1)).reject("opp-1", "d3");
+        assertGaugeReleaseCounter("ok", 1.0);
     }
 
     private void assertCounter(String result, double expected) {

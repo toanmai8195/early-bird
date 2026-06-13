@@ -28,6 +28,8 @@ public final class ConsumerRunner {
     private final MetricsServer metricsServer;
     private final ManagerConfig config;
 
+    private volatile boolean running = true;
+
     @Inject
     public ConsumerRunner(KafkaConsumer<String, String> consumer,
                           ClaimHandler handler,
@@ -40,6 +42,11 @@ public final class ConsumerRunner {
     }
 
     public void run() {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            running = false;
+            consumer.close();
+        }));
+
         System.out.printf("manager starting: brokers=%s group=%s topic=%s pollTimeoutMs=%d maxPollRecords=%d%n",
                 config.kafkaBrokers(), config.groupId(), config.topic(),
                 config.pollTimeoutMs(), config.maxPollRecords());
@@ -47,7 +54,7 @@ public final class ConsumerRunner {
         metricsServer.start(config.metricsPort());
         consumer.subscribe(List.of(config.topic()));
         Duration pollTimeout = Duration.ofMillis(config.pollTimeoutMs());
-        while (true) {
+        while (running) {
             ConsumerRecords<String, String> records = consumer.poll(pollTimeout);
             if (records.isEmpty()) {
                 continue;

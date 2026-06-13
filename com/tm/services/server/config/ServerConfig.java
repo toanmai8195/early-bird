@@ -17,7 +17,6 @@ public final class ServerConfig {
                 .with("metrics-port", "METRICS_PORT", "9404")
                 .with("redis-uri", "REDIS_URI", "redis://localhost:6379")
                 .with("kafka-brokers", "KAFKA_BROKERS", "localhost:9092")
-                .with("capacity", "CAPACITY", "1000")
                 .with("jdbc-url", "JDBC_URL", "jdbc:postgresql://localhost:5432/earlybird")
                 .with("jdbc-user", "JDBC_USER", "earlybird")
                 .with("jdbc-password", "JDBC_PASSWORD", "earlybird")
@@ -42,11 +41,6 @@ public final class ServerConfig {
 
     public String kafkaBrokers() {
         return config.get("kafka-brokers");
-    }
-
-    /** Cap on throughput while the Redis gate circuit is OPEN (degraded mode). */
-    public int capacity() {
-        return config.getInt("capacity");
     }
 
     public String jdbcUrl() {

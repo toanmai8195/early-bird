@@ -6,7 +6,6 @@ import com.tm.common.metric.Metrics;
 import com.tm.common.redis.ClaimGate;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.micrometer.core.instrument.Timer;
 import io.vertx.core.Future;
 import io.vertx.ext.web.RoutingContext;
@@ -23,10 +22,10 @@ import javax.inject.Singleton;
  * 200). No worker-thread blocking.
  *
  * <p>A {@link CircuitBreaker} wraps the gate call: if Redis is down/timing out,
- * the circuit opens and requests fast-reject the gate instead of queueing on it.
- * While open, a local {@link RateLimiter} throttles claims and lets them through
- * to Kafka degraded (no dedupe/capacity gate) — PG's atomic decrement + UNIQUE
- * constraint remain the correctness backstop (see CLAUDE.md "Redis chết").
+ * the circuit opens and all requests are rejected with 503 (no degraded-pass-through).
+ * PG's atomic decrement + UNIQUE remain the correctness backstop, but without the
+ * Redis gate the fairness and fast-reject guarantees are lost, so we prefer to shed
+ * load rather than silently degrade (see CLAUDE.md "Redis chết").
  *
  * <p>See .claude/rules/observability-metrics.md — the endpoint records a counter
  * tagged by outcome + a P99 latency timer.
@@ -41,16 +40,14 @@ public final class ClaimHandlerImpl implements ClaimHandler {
     private final ClaimProducer producer;
     private final Metrics metrics;
     private final CircuitBreaker circuitBreaker;
-    private final RateLimiter degradeLimiter;
 
     @Inject
     public ClaimHandlerImpl(ClaimGate gate, ClaimProducer producer, Metrics metrics,
-                             CircuitBreaker circuitBreaker, RateLimiter degradeLimiter) {
+                             CircuitBreaker circuitBreaker) {
         this.gate = gate;
         this.producer = producer;
         this.metrics = metrics;
         this.circuitBreaker = circuitBreaker;
-        this.degradeLimiter = degradeLimiter;
     }
 
     @Override
@@ -79,8 +76,6 @@ public final class ClaimHandlerImpl implements ClaimHandler {
                     case DUP -> Future.succeededFuture(new Reply(200, "ACCEPTED", "dup"));
                     case FULL -> Future.succeededFuture(new Reply(409, "FULL", "full"));
                     case CLOSED -> Future.succeededFuture(new Reply(409, "CLOSED", "closed"));
-                    case DEGRADED -> producer.publish(new ClaimEvent(opportunityId, driverId, idempotencyKey))
-                            .map(v -> new Reply(202, "ACCEPTED", "degraded"));
                     case THROTTLED -> Future.succeededFuture(new Reply(503, "UNAVAILABLE", "throttled"));
                 })
                 .onComplete(ar -> {
@@ -119,13 +114,12 @@ public final class ClaimHandlerImpl implements ClaimHandler {
                         : Future.failedFuture(err));
     }
 
-    /** No-Redis fallback: throttle locally and let Kafka/PG carry correctness. */
     private Future<Outcome> degraded() {
-        return Future.succeededFuture(degradeLimiter.acquirePermission() ? Outcome.DEGRADED : Outcome.THROTTLED);
+        return Future.succeededFuture(Outcome.THROTTLED);
     }
 
     private enum Outcome {
-        OK, FULL, DUP, CLOSED, DEGRADED, THROTTLED;
+        OK, FULL, DUP, CLOSED, THROTTLED;
 
         static Outcome from(ClaimGate.Result result) {
             return switch (result) {

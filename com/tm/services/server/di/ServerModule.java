@@ -6,8 +6,6 @@ import dagger.Module;
 import dagger.Provides;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
-import io.github.resilience4j.ratelimiter.RateLimiter;
-import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
@@ -94,19 +92,4 @@ public final class ServerModule {
         return CircuitBreaker.of("redis-gate", cbConfig);
     }
 
-    /**
-     * While the Redis gate circuit is OPEN, throttles claims locally so we don't
-     * overwhelm Kafka/PG with unmetered traffic. PG's atomic decrement + UNIQUE
-     * remain the correctness backstop while this is active.
-     */
-    @Provides
-    @Singleton
-    static RateLimiter redisDegradeLimiter(ServerConfig config) {
-        RateLimiterConfig rlConfig = RateLimiterConfig.custom()
-                .limitForPeriod(config.capacity())
-                .limitRefreshPeriod(Duration.ofSeconds(1))
-                .timeoutDuration(Duration.ZERO)
-                .build();
-        return RateLimiter.of("redis-degrade", rlConfig);
-    }
 }

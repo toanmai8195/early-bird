@@ -43,4 +43,13 @@ public final class VertxClaimGate implements ClaimGate {
         String key = "claimed_set:" + opportunityId;
         return redis.srem(List.of(key, driverId)).mapEmpty();
     }
+
+    @Override
+    public Future<Void> reject(String opportunityId, String driverId) {
+        String claimedKey = "claimed_set:" + opportunityId;
+        String metaKey = "opp_meta:" + opportunityId;
+        return redis.srem(List.of(claimedKey, driverId))
+                .compose(v -> redis.hincrby(metaKey, "capacity", "-1"))
+                .mapEmpty();
+    }
 }
