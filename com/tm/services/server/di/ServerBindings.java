@@ -3,7 +3,9 @@ package com.tm.services.server.di;
 import com.tm.common.kafka.ClaimProducer;
 import com.tm.common.kafka.VertxClaimProducer;
 import com.tm.common.metric.Metrics;
+import com.tm.common.metric.MetricsServer;
 import com.tm.common.metric.MicrometerMetrics;
+import com.tm.common.metric.PrometheusMetricsServer;
 import com.tm.common.redis.ClaimGate;
 import com.tm.common.redis.VertxClaimGate;
 import com.tm.services.server.dao.JdbcOpportunityDao;
@@ -36,6 +38,10 @@ public interface ServerBindings {
     @Binds
     @Singleton
     Metrics metrics(MicrometerMetrics impl);
+
+    @Binds
+    @Singleton
+    MetricsServer metricsServer(PrometheusMetricsServer impl);
 
     @Binds
     @Singleton

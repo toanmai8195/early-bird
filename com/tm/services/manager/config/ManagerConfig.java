@@ -28,6 +28,7 @@ public final class ManagerConfig {
         Config config = Config.from(args)
                 .with("kafka-brokers", "KAFKA_BROKERS", "localhost:9092")
                 .with("redis-uri", "REDIS_URI", "redis://localhost:6379")
+                .with("metrics-port", "METRICS_PORT", "9404")
                 .with("group-id", "GROUP_ID", "claim-manager")
                 .with("topic", "TOPIC", "claim-events")
                 .with("poll-timeout-ms", "POLL_TIMEOUT_MS", "500")
@@ -42,6 +43,11 @@ public final class ManagerConfig {
 
     public String kafkaBrokers() {
         return config.get("kafka-brokers");
+    }
+
+    /** Port for the Prometheus {@code /metrics} scrape endpoint. */
+    public int metricsPort() {
+        return config.getInt("metrics-port");
     }
 
     public String redisUri() {

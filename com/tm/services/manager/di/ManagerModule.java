@@ -7,7 +7,8 @@ import com.tm.services.manager.config.ManagerConfig;
 import dagger.Module;
 import dagger.Provides;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.vertx.core.Vertx;
 import io.vertx.core.WorkerExecutor;
 import io.vertx.redis.client.Redis;
@@ -31,8 +32,13 @@ public final class ManagerModule {
 
     @Provides
     @Singleton
-    static MeterRegistry meterRegistry() {
-        return new SimpleMeterRegistry();
+    static PrometheusMeterRegistry prometheusMeterRegistry() {
+        return new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+    }
+
+    @Provides
+    static MeterRegistry meterRegistry(PrometheusMeterRegistry registry) {
+        return registry;
     }
 
     @Provides

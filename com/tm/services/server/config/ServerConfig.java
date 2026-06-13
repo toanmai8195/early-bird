@@ -14,6 +14,7 @@ public final class ServerConfig {
     public static ServerConfig load(String[] args) {
         Config config = Config.from(args)
                 .with("port", "PORT", "8080")
+                .with("metrics-port", "METRICS_PORT", "9404")
                 .with("redis-uri", "REDIS_URI", "redis://localhost:6379")
                 .with("kafka-brokers", "KAFKA_BROKERS", "localhost:9092")
                 .with("capacity", "CAPACITY", "1000")
@@ -28,6 +29,11 @@ public final class ServerConfig {
 
     public int port() {
         return config.getInt("port");
+    }
+
+    /** Port for the Prometheus {@code /metrics} scrape endpoint. */
+    public int metricsPort() {
+        return config.getInt("metrics-port");
     }
 
     public String redisUri() {

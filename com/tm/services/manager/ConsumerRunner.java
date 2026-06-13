@@ -1,6 +1,7 @@
 package com.tm.services.manager;
 
 import com.tm.common.kafka.ClaimEvent;
+import com.tm.common.metric.MetricsServer;
 import com.tm.services.manager.config.ManagerConfig;
 import com.tm.services.manager.handler.ClaimHandler;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -24,14 +25,17 @@ public final class ConsumerRunner {
 
     private final KafkaConsumer<String, String> consumer;
     private final ClaimHandler handler;
+    private final MetricsServer metricsServer;
     private final ManagerConfig config;
 
     @Inject
     public ConsumerRunner(KafkaConsumer<String, String> consumer,
                           ClaimHandler handler,
+                          MetricsServer metricsServer,
                           ManagerConfig config) {
         this.consumer = consumer;
         this.handler = handler;
+        this.metricsServer = metricsServer;
         this.config = config;
     }
 
@@ -40,6 +44,7 @@ public final class ConsumerRunner {
                 config.kafkaBrokers(), config.groupId(), config.topic(),
                 config.pollTimeoutMs(), config.maxPollRecords());
 
+        metricsServer.start(config.metricsPort());
         consumer.subscribe(List.of(config.topic()));
         Duration pollTimeout = Duration.ofMillis(config.pollTimeoutMs());
         while (true) {

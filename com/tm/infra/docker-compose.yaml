@@ -1,20 +1,28 @@
 # Local dev infra for the booking system: Redis (claim gate + pending set),
-# Kafka (claim event hand-off), Postgres (source of truth + backstop).
+# Kafka (claim event hand-off), Postgres (source of truth + backstop),
+# Prometheus (scrapes server/manager /metrics), Grafana (dashboards).
+#
+# Usage: see ../../../Makefile (`make infra-up`, `make server`, `make manager`).
 services:
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "2gb", "--maxmemory-policy", "noeviction"]
     ports: ["6379:6379"]
 
   kafka:
-    image: bitnami/kafka:3.7
+    image: apache/kafka:3.8.0
     environment:
-      KAFKA_CFG_NODE_ID: "0"
-      KAFKA_CFG_PROCESS_ROLES: "controller,broker"
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "0@kafka:9093"
-      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
-      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092"
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "controller,broker"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      # PLAINTEXT: host clients (load-gen, loadtest); INTERNAL: other containers
+      # on the compose network (server/manager use kafka:9094).
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,INTERNAL://:9094,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092,INTERNAL://kafka:9094"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
     ports: ["9092:9092"]
 
   postgres:
@@ -24,3 +32,76 @@ services:
       POSTGRES_USER: earlybird
       POSTGRES_PASSWORD: earlybird
     ports: ["5432:5432"]
+    volumes:
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+    ports: ["3000:3000"]
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]
+
+  # Load-test images (Bazel-built, profile "loadtest"); not pulled from registry.
+  loadtest-redis-counter:
+    image: early-bird/loadtest-redis-counter:latest
+    pull_policy: never
+    profiles: ["loadtest"]
+    depends_on: [redis]
+    ports: ["9410:9410"]
+    environment:
+      REDIS_ADDR: "redis:6379"
+    command:
+      - "--redis=redis:6379"
+      - "--metrics-addr=:9410"
+      - "--run=gate"
+      - "--pool=500"
+      - "--gate-requests=10000000"
+      - "--capacity=1000000"
+      - "--dup-n=5000"
+      - "--gate-rps=20000"
+
+  loadtest-pg:
+    image: early-bird/loadtest-pg:latest
+    pull_policy: never
+    profiles: ["loadtest"]
+    depends_on: [postgres]
+    ports: ["9411:9411"]
+    environment:
+      PG_DSN: "postgres://earlybird:earlybird@postgres:5432/earlybird?sslmode=disable"
+    command:
+      - "--pg=postgres://earlybird:earlybird@postgres:5432/earlybird?sslmode=disable"
+      - "--metrics-addr=:9411"
+
+  # Bazel-built images (see `make server` / `make manager`); not pulled.
+  server:
+    image: early-bird/server:latest
+    pull_policy: never
+    profiles: ["app"]
+    depends_on: [redis, kafka, postgres]
+    ports: ["8080:8080", "9404:9404"]
+    environment:
+      REDIS_URI: "redis://redis:6379"
+      KAFKA_BROKERS: "kafka:9094"
+      JDBC_URL: "jdbc:postgresql://postgres:5432/earlybird"
+
+  manager:
+    image: early-bird/manager:latest
+    pull_policy: never
+    profiles: ["app"]
+    depends_on: [redis, kafka, postgres]
+    ports: ["9405:9404"]
+    environment:
+      REDIS_URI: "redis://redis:6379"
+      KAFKA_BROKERS: "kafka:9094"
+      JDBC_URL: "jdbc:postgresql://postgres:5432/earlybird"

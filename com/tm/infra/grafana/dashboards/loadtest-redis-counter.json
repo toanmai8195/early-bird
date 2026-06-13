@@ -1,0 +1,401 @@
+{
+  "title": "Loadtest — Redis Counter",
+  "uid": "loadtest-redis-counter",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "tags": ["loadtest"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Claim rate by result (all scenarios)",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "sum by (scenario, result) (rate(loadtest_redis_claims_total[15s]))",
+          "legendFormat": "{{scenario}} / {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Gate scenario — accepted vs full vs dup",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "accepted" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "full"     }, "properties": [{ "id": "color", "value": { "fixedColor": "orange","mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "dup"      }, "properties": [{ "id": "color", "value": { "fixedColor": "blue",  "mode": "fixed" } }] }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(loadtest_redis_claims_total{scenario=\"gate\",result=\"accepted\"}[15s])",
+          "legendFormat": "accepted"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(loadtest_redis_claims_total{scenario=\"gate\",result=\"full\"}[15s])",
+          "legendFormat": "full"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(loadtest_redis_claims_total{scenario=\"gate\",result=\"dup\"}[15s])",
+          "legendFormat": "dup"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(loadtest_redis_claims_total{scenario=\"gate\",result=\"error\"}[15s])",
+          "legendFormat": "error"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Closed scenario — all must be closed",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "closed"   }, "properties": [{ "id": "color", "value": { "fixedColor": "blue",  "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "accepted" }, "properties": [{ "id": "color", "value": { "fixedColor": "red",   "mode": "fixed" } }] }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(loadtest_redis_claims_total{scenario=\"closed\",result=\"closed\"}[15s])",
+          "legendFormat": "closed"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(loadtest_redis_claims_total{scenario=\"closed\",result=\"accepted\"}[15s])",
+          "legendFormat": "accepted (should be 0)"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(loadtest_redis_claims_total{scenario=\"closed\",result=\"error\"}[15s])",
+          "legendFormat": "error"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Gate — total accepted",
+      "gridPos": { "x": 0, "y": 16, "w": 4, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "loadtest_redis_claims_total{scenario=\"gate\",result=\"accepted\"}",
+          "legendFormat": "accepted"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Gate — total full",
+      "gridPos": { "x": 4, "y": 16, "w": 4, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "orange" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "loadtest_redis_claims_total{scenario=\"gate\",result=\"full\"}",
+          "legendFormat": "full"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Gate — total dup",
+      "gridPos": { "x": 8, "y": 16, "w": 4, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "loadtest_redis_claims_total{scenario=\"gate\",result=\"dup\"}",
+          "legendFormat": "dup"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Gate — errors (must be 0)",
+      "gridPos": { "x": 12, "y": 16, "w": 4, "h": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "error" },
+            "properties": [
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
+              { "id": "color", "value": { "mode": "thresholds" } }
+            ]
+          }
+        ]
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "loadtest_redis_claims_total{scenario=\"gate\",result=\"error\"}",
+          "legendFormat": "error"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Closed — accepted (must be 0)",
+      "gridPos": { "x": 16, "y": 16, "w": 4, "h": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "accepted" },
+            "properties": [
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
+              { "id": "color", "value": { "mode": "thresholds" } }
+            ]
+          }
+        ]
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "loadtest_redis_claims_total{scenario=\"closed\",result=\"accepted\"}",
+          "legendFormat": "accepted"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Ramp — total requests sent",
+      "gridPos": { "x": 20, "y": 16, "w": 4, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "sum(loadtest_redis_claims_total{scenario=~\"ramp.*\"})",
+          "legendFormat": "sent"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "bargauge",
+      "title": "Ramp — p99 latency per step",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "displayMode": "gradient"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "loadtest_redis_latency_p99_seconds",
+          "legendFormat": "{{scenario}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "bargauge",
+      "title": "Ramp — p50 latency per step",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.005 },
+              { "color": "red", "value": 0.05 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "displayMode": "gradient"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "loadtest_redis_latency_p50_seconds",
+          "legendFormat": "{{scenario}}"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Gate — progress (cumulative events sent)",
+      "description": "Shows how many events have been sent so far. Reaches 10M at end of run.",
+      "gridPos": { "x": 0, "y": 36, "w": 24, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "total sent" },   "properties": [{ "id": "color", "value": { "fixedColor": "blue",   "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "accepted" },     "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "full" },         "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "dup" },          "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "sum(loadtest_redis_claims_total{scenario=~\"gate.*\"})",
+          "legendFormat": "total sent"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "sum(loadtest_redis_claims_total{scenario=~\"gate.*\",result=\"accepted\"})",
+          "legendFormat": "accepted"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "sum(loadtest_redis_claims_total{scenario=~\"gate.*\",result=\"full\"})",
+          "legendFormat": "full"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "sum(loadtest_redis_claims_total{scenario=~\"gate.*\",result=\"dup\"})",
+          "legendFormat": "dup"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Gate — total sent",
+      "gridPos": { "x": 0, "y": 44, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "value_and_name" },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "sum(loadtest_redis_claims_total{scenario=~\"gate.*\"})", "legendFormat": "sent" }]
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Gate — accepted",
+      "gridPos": { "x": 6, "y": 44, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "value_and_name" },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "sum(loadtest_redis_claims_total{scenario=~\"gate.*\",result=\"accepted\"})", "legendFormat": "accepted" }]
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Gate — dup",
+      "gridPos": { "x": 12, "y": 44, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "purple" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "value_and_name" },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "sum(loadtest_redis_claims_total{scenario=~\"gate.*\",result=\"dup\"})", "legendFormat": "dup" }]
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Gate — full (rejected)",
+      "gridPos": { "x": 18, "y": 44, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "orange" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "value_and_name" },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "sum(loadtest_redis_claims_total{scenario=~\"gate.*\",result=\"full\"})", "legendFormat": "full" }]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Gate — throughput (req/s) during run",
+      "gridPos": { "x": 0, "y": 48, "w": 24, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } } },
+      "options": { "legend": { "displayMode": "table", "placement": "right" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "sum(rate(loadtest_redis_claims_total{scenario=~\"gate.*\"}[30s]))",
+          "legendFormat": "total RPS"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(loadtest_redis_claims_total{scenario=~\"gate.*\",result=\"accepted\"}[30s])",
+          "legendFormat": "accepted/s"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "rate(loadtest_redis_claims_total{scenario=~\"gate.*\",result=\"full\"}[30s])",
+          "legendFormat": "full/s"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Ramp — latency over time (p50 / p99 / max)",
+      "gridPos": { "x": 0, "y": 28, "w": 24, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*p50.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*p99.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange","mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*max.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "red",   "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "loadtest_redis_latency_p50_seconds",
+          "legendFormat": "{{scenario}} p50"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "loadtest_redis_latency_p99_seconds",
+          "legendFormat": "{{scenario}} p99"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "loadtest_redis_latency_max_seconds",
+          "legendFormat": "{{scenario}} max"
+        }
+      ]
+    }
+  ]
+}

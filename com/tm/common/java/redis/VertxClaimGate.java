@@ -18,8 +18,8 @@ public final class VertxClaimGate implements ClaimGate {
             "if not meta[1] then return 'CLOSED' end\n" +
             "local now = tonumber(redis.call('TIME')[1])\n" +
             "if now < tonumber(meta[2]) then return 'CLOSED' end\n" +
-            "if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 1 then return 'DUP' end\n" +
             "if redis.call('SCARD', KEYS[1]) >= tonumber(meta[1]) then return 'FULL' end\n" +
+            "if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 1 then return 'DUP' end\n" +
             "redis.call('SADD', KEYS[1], ARGV[1])\n" +
             "return 'OK'";
 
