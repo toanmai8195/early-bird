@@ -16,4 +16,11 @@ public interface BookingDao {
      * fails with the underlying {@link java.sql.SQLException} on error.
      */
     Future<List<ClaimStore.Outcome>> settleOpportunity(String opportunityId, List<ClaimEvent> events);
+
+    /**
+     * Cheap PG liveness probe ({@code SELECT 1}) used to drive circuit-breaker
+     * recovery independent of request traffic. Succeeds if PG is reachable; fails
+     * with the underlying {@link java.sql.SQLException} otherwise.
+     */
+    Future<Void> ping();
 }

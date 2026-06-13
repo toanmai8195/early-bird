@@ -29,6 +29,10 @@ public interface Config {
         return Long.parseLong(get(key));
     }
 
+    default boolean getBool(String key) {
+        return Boolean.parseBoolean(get(key));
+    }
+
     /** Starts a builder seeded with CLI overrides parsed from {@code args}. */
     static Builder from(String[] args) {
         return new Builder(parseArgs(args));

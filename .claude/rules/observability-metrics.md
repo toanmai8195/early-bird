@@ -5,26 +5,26 @@ paths:
   - "com/tm/common/java/pg/**"
 ---
 
-# Metric bắt buộc (counter + latency)
+# Required metrics (counter + latency)
 
-Dùng `com.tm.common.metric` (Micrometer) cho mọi instrumentation. Đơn vị đo:
+Use `com.tm.common.metric` (Micrometer) for all instrumentation. Units of measurement:
 
-- **API endpoint** (HTTP handler trong `services/server`): mỗi endpoint PHẢI có
-  - counter (đếm số request, tách theo outcome: ok / full / dup / error), VÀ
-  - latency timer publish percentile **P99** (`Timer` với
-    `.publishPercentiles(0.99)` hoặc `.percentilePrecision(...)`).
-- **Kafka consumer** (`services/manager`): mỗi consumer/handler PHẢI có counter
-  (số message xử lý, tách theo success / error).
-- **Kafka producer** (`common/java/kafka`, call site trong services): mỗi đường
-  publish PHẢI có counter (số message publish, tách theo success / error).
-- **DAO function** (mọi method truy cập DB trong `common/java/pg`, vd `ClaimStore`):
-  mỗi func PHẢI có
-  - counter (số lần gọi, tách theo outcome), VÀ
-  - latency timer publish **P99**.
+- **API endpoint** (HTTP handler in `services/server`): each endpoint MUST have
+  - a counter (counting requests, split by outcome: ok / full / dup / error), AND
+  - a latency timer publishing the **P99** percentile (`Timer` with
+    `.publishPercentiles(0.99)` or `.percentilePrecision(...)`).
+- **Kafka consumer** (`services/manager`): each consumer/handler MUST have a counter
+  (messages processed, split by success / error).
+- **Kafka producer** (`common/java/kafka`, call site in services): each publish
+  path MUST have a counter (messages published, split by success / error).
+- **DAO function** (every DB-accessing method in `common/java/pg`, e.g. `ClaimStore`):
+  each function MUST have
+  - a counter (number of calls, split by outcome), AND
+  - a latency timer publishing **P99**.
 
-Quy ước:
-- Không thêm/sửa API, consumer, producer, hay DAO func mà thiếu metric tương ứng.
-- Counter tách theo `result`/`outcome` tag để phân biệt success vs các loại lỗi.
-- Latency đo bằng `Timer` (không tự tính), bật percentile P99 để alert/SLO dùng được.
-- Đặt tên metric nhất quán: `booking.<area>.<thing>` (vd `booking.claim.outcome`,
+Conventions:
+- Do not add/change an API, consumer, producer, or DAO function without a corresponding metric.
+- Split counters by a `result`/`outcome` tag to distinguish success from the various error types.
+- Measure latency with a `Timer` (don't compute it yourself), enabling the P99 percentile so it's usable for alerting/SLO.
+- Name metrics consistently: `booking.<area>.<thing>` (e.g. `booking.claim.outcome`,
   `booking.dao.commit.latency`).

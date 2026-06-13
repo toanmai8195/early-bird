@@ -20,7 +20,7 @@ public class ClaimProducerTest {
         when(mock.write(any())).thenReturn(Future.succeededFuture());
 
         ClaimProducer producer = new VertxClaimProducer(mock);
-        producer.publish(new ClaimEvent("opp-1", "driver-9", "idem-abc"));
+        producer.publish(new ClaimEvent("opp-1", "driver-9", "idem-abc", 0L));
 
         ArgumentCaptor<KafkaProducerRecord<String, String>> rec =
                 ArgumentCaptor.forClass(KafkaProducerRecord.class);
@@ -28,6 +28,6 @@ public class ClaimProducerTest {
 
         assertEquals(ClaimProducer.TOPIC, rec.getValue().topic());
         assertEquals("opp-1", rec.getValue().key());  // partition by opportunity_id
-        assertEquals(new ClaimEvent("opp-1", "driver-9", "idem-abc").toJson(), rec.getValue().value());
+        assertEquals(new ClaimEvent("opp-1", "driver-9", "idem-abc", 0L).toJson(), rec.getValue().value());
     }
 }

@@ -9,7 +9,7 @@ public class ClaimEventTest {
 
     @Test
     public void toJsonContainsAllFields() {
-        ClaimEvent e = new ClaimEvent("opp-1", "driver-9", "idem-abc");
+        ClaimEvent e = new ClaimEvent("opp-1", "driver-9", "idem-abc", 0L);
         String json = e.toJson();
         assertTrue(json.contains("\"opportunity_id\":\"opp-1\""));
         assertTrue(json.contains("\"driver_id\":\"driver-9\""));
@@ -18,7 +18,7 @@ public class ClaimEventTest {
 
     @Test
     public void accessorsExposeComponents() {
-        ClaimEvent e = new ClaimEvent("opp-1", "driver-9", "idem-abc");
+        ClaimEvent e = new ClaimEvent("opp-1", "driver-9", "idem-abc", 0L);
         assertEquals("opp-1", e.opportunityId());
         assertEquals("driver-9", e.driverId());
         assertEquals("idem-abc", e.idempotencyKey());
@@ -26,7 +26,7 @@ public class ClaimEventTest {
 
     @Test
     public void fromJsonRoundTrips() {
-        ClaimEvent original = new ClaimEvent("opp-1", "driver-9", "idem-abc");
+        ClaimEvent original = new ClaimEvent("opp-1", "driver-9", "idem-abc", 0L);
         ClaimEvent parsed = ClaimEvent.fromJson(original.toJson());
         assertEquals(original, parsed);
     }

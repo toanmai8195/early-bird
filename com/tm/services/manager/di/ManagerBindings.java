@@ -1,11 +1,11 @@
 package com.tm.services.manager.di;
 
-import com.tm.common.metric.MetricsServer;
-import com.tm.common.metric.PrometheusMetricsServer;
 import com.tm.common.pg.ClaimStore;
 import com.tm.common.pg.PgClaimStore;
 import com.tm.common.redis.ClaimGate;
+import com.tm.common.redis.PgHealth;
 import com.tm.common.redis.VertxClaimGate;
+import com.tm.common.redis.VertxPgHealth;
 import com.tm.services.manager.dao.BookingDao;
 import com.tm.services.manager.dao.JdbcBookingDao;
 import com.tm.services.manager.handler.ClaimHandler;
@@ -29,13 +29,13 @@ public interface ManagerBindings {
 
     @Binds
     @Singleton
+    PgHealth pgHealth(VertxPgHealth impl);
+
+    @Binds
+    @Singleton
     BookingDao bookingDao(JdbcBookingDao impl);
 
     @Binds
     @Singleton
     ClaimHandler claimHandler(ClaimHandlerImpl impl);
-
-    @Binds
-    @Singleton
-    MetricsServer metricsServer(PrometheusMetricsServer impl);
 }

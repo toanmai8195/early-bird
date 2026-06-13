@@ -22,6 +22,7 @@ public final class ServerConfig {
                 .with("jdbc-password", "JDBC_PASSWORD", "earlybird")
                 .with("db-pool-size", "DB_POOL_SIZE", "4")
                 .with("redis-warmup-interval-ms", "REDIS_WARMUP_INTERVAL_MS", "5000")
+                .with("disable-circuit-breaker", "DISABLE_CIRCUIT_BREAKER", "false")
                 .build();
         return new ServerConfig(config);
     }
@@ -58,6 +59,11 @@ public final class ServerConfig {
     /** Worker pool size for opportunity-CRUD JDBC ops. */
     public int dbPoolSize() {
         return config.getInt("db-pool-size");
+    }
+
+    /** When true, Redis circuit breaker is forced to DISABLED state (for load testing). */
+    public boolean disableCircuitBreaker() {
+        return config.getBool("disable-circuit-breaker");
     }
 
     /**

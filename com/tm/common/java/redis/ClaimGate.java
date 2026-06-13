@@ -14,9 +14,11 @@ public interface ClaimGate {
 
     /**
      * OK = slot acquired, FULL = capacity reached, DUP = idempotent retry,
-     * CLOSED = booking window not currently open.
+     * CLOSED = booking window not currently open, DOWN = PG unhealthy
+     * (manager's circuit breaker open, see {@link PgHealth}) so the gate sheds
+     * the claim before touching opportunity state.
      */
-    enum Result { OK, FULL, DUP, CLOSED }
+    enum Result { OK, FULL, DUP, CLOSED, DOWN }
 
     /**
      * Runs the atomic gate for one (opportunity, driver) pair. {@code capacity}

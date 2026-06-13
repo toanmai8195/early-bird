@@ -42,12 +42,12 @@ maven.install(
         "io.vertx:vertx-kafka-client:4.5.11",
         "org.apache.kafka:kafka-clients:3.8.1",
         "org.postgresql:postgresql:42.7.4",
+        "com.zaxxer:HikariCP:5.1.0",
         "io.micrometer:micrometer-core:1.13.6",
         "io.micrometer:micrometer-registry-prometheus:1.13.6",
         "org.slf4j:slf4j-simple:2.0.16",
         # resilience (fast-fail when Redis is down)
         "io.github.resilience4j:resilience4j-circuitbreaker:2.2.0",
-        "io.github.resilience4j:resilience4j-ratelimiter:2.2.0",
         # dependency injection
         "com.google.dagger:dagger:2.51.1",
         "com.google.dagger:dagger-compiler:2.51.1",

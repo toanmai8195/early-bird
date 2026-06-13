@@ -1,0 +1,10 @@
+load("//bazel:oci.bzl", "go_image")
+
+go_image(
+    name = "server_lt",
+    srcs = ["main.go"],
+    importpath = "github.com/tm/loadtest/server",
+    deps = ["//com/tm/loadtest/lt"],
+    exposed_ports = ["9412"],
+    repo_tag = "early-bird/loadtest-server:latest",
+)

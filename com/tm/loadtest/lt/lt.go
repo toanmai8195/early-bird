@@ -172,6 +172,14 @@ func Label(status int, body []byte) string {
 			return "closed"
 		}
 		return "full"
+	case 503:
+		// Server returns 503 for two distinct reasons, distinguished by body:
+		//   "THROTTLED"   = Redis circuit breaker open (degraded throttle)
+		//   "UNAVAILABLE" = real server-side failure (Kafka publish / gate error)
+		if bytes.Contains(body, []byte("THROTTLED")) {
+			return "throttled"
+		}
+		return "error"
 	default:
 		return "error"
 	}

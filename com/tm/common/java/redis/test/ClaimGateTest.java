@@ -32,6 +32,8 @@ public class ClaimGateTest {
                 new VertxClaimGate(redisReturning("DUP")).claim("opp-1", "d1").result());
         assertEquals(ClaimGate.Result.CLOSED,
                 new VertxClaimGate(redisReturning("CLOSED")).claim("opp-1", "d1").result());
+        assertEquals(ClaimGate.Result.DOWN,
+                new VertxClaimGate(redisReturning("DOWN")).claim("opp-1", "d1").result());
     }
 
     @Test
@@ -78,10 +80,11 @@ public class ClaimGateTest {
         Mockito.verify(redis).eval(args.capture());
 
         List<String> a = args.getValue();
-        // [script, numkeys, claimed_set key, opp_meta key, driver_id]
-        assertEquals("2", a.get(1));
+        // [script, numkeys, claimed_set key, opp_meta key, pg_health key, driver_id]
+        assertEquals("3", a.get(1));
         assertEquals("claimed_set:opp-42", a.get(2));
         assertEquals("opp_meta:opp-42", a.get(3));
-        assertEquals("driver-7", a.get(4));
+        assertEquals(PgHealth.KEY, a.get(4));
+        assertEquals("driver-7", a.get(5));
     }
 }

@@ -12,8 +12,10 @@ import javax.inject.Singleton;
 public final class VertxClaimGate implements ClaimGate {
 
     // KEYS[1]=claimed_set:{opp}, KEYS[2]=opp_meta:{opp} (hash: capacity, window_start;
-    // TTL'd to window_end at creation time), ARGV[1]=driver_id
+    // TTL'd to window_end at creation time), KEYS[3]=pg_health (global kill switch),
+    // ARGV[1]=driver_id
     private static final String SCRIPT =
+            "if redis.call('GET', KEYS[3]) == '" + PgHealth.DOWN + "' then return 'DOWN' end\n" +
             "local meta = redis.call('HMGET', KEYS[2], 'capacity', 'window_start')\n" +
             "if not meta[1] then return 'CLOSED' end\n" +
             "local now = tonumber(redis.call('TIME')[1])\n" +
@@ -34,7 +36,7 @@ public final class VertxClaimGate implements ClaimGate {
     public Future<Result> claim(String opportunityId, String driverId) {
         String claimedKey = "claimed_set:" + opportunityId;
         String metaKey = "opp_meta:" + opportunityId;
-        return redis.eval(List.of(SCRIPT, "2", claimedKey, metaKey, driverId))
+        return redis.eval(List.of(SCRIPT, "3", claimedKey, metaKey, PgHealth.KEY, driverId))
                 .map(resp -> Result.valueOf(resp.toString()));
     }
 

@@ -5,30 +5,30 @@ paths:
   - "com/tm/infra/grafana/**"
 ---
 
-# Grafana dashboard cho mỗi metric
+# A Grafana dashboard for every metric
 
-Mọi metric tạo ra (counter / timer qua `com.tm.common.metric.Metrics`) PHẢI có một
-Grafana panel tương ứng. Không thêm/sửa metric mà thiếu panel.
+Every metric created (counter / timer via `com.tm.common.metric.Metrics`) MUST have a
+corresponding Grafana panel. Do not add/change a metric without a panel.
 
-## Quy ước tổ chức
-- **Mỗi service = 1 dashboard**: `com/tm/infra/grafana/dashboards/<service>.json`
-  (vd `server.json`, `manager.json`).
-- **Mỗi "stack" trong common-lib có metric = 1 dashboard**:
-  `com/tm/infra/grafana/dashboards/common-<stack>.json` (vd `common-pg.json`,
-  `common-redis.json`). Chỉ tạo nếu stack đó thực sự phát metric.
-- Dashboard lưu dưới dạng JSON model (Grafana export format), versioned trong repo.
+## Organization convention
+- **Each service = 1 dashboard**: `com/tm/infra/grafana/dashboards/<service>.json`
+  (e.g. `server.json`, `manager.json`).
+- **Each common-lib "stack" with a metric = 1 dashboard**:
+  `com/tm/infra/grafana/dashboards/common-<stack>.json` (e.g. `common-pg.json`,
+  `common-redis.json`). Create one only if that stack actually emits metrics.
+- Dashboards are stored as JSON models (Grafana export format), versioned in the repo.
 
-## Mỗi panel cần
-- Đặt đúng dashboard theo nơi metric được **emit** (service nào gọi `Metrics` thì panel
-  nằm ở dashboard service đó; metric emit từ trong code common-lib thì nằm ở dashboard
-  `common-<stack>`).
-- Query khớp tên metric + tag (vd `booking_claim_outcome_total{result=~"ok|full|dup"}`).
-- **Counter** → panel rate (vd `rate(<metric>_total[1m])`), tách theo tag `result`.
-- **Timer (latency)** → panel hiển thị **P99** (vd
-  `histogram_quantile(0.99, ...)` hoặc series `..._seconds{quantile="0.99"}`), khớp với
-  yêu cầu P99 ở [observability-metrics.md](observability-metrics.md).
+## Each panel needs
+- To live in the right dashboard based on where the metric is **emitted** (whichever service
+  calls `Metrics` gets the panel in that service's dashboard; a metric emitted from common-lib
+  code goes in the `common-<stack>` dashboard).
+- A query matching the metric name + tags (e.g. `booking_claim_outcome_total{result=~"ok|full|dup"}`).
+- **Counter** → a rate panel (e.g. `rate(<metric>_total[1m])`), split by the `result` tag.
+- **Timer (latency)** → a panel showing **P99** (e.g.
+  `histogram_quantile(0.99, ...)` or the series `..._seconds{quantile="0.99"}`), matching the
+  P99 requirement in [observability-metrics.md](observability-metrics.md).
 
-## Khi thêm metric mới
-1. Thêm metric trong code (theo observability-metrics.md).
-2. Thêm panel vào dashboard JSON tương ứng (tạo dashboard nếu chưa có).
-3. Panel title + metric name nhất quán với naming `booking.<area>.<thing>`.
+## When adding a new metric
+1. Add the metric in code (per observability-metrics.md).
+2. Add a panel to the corresponding dashboard JSON (create the dashboard if it doesn't exist).
+3. Keep the panel title + metric name consistent with the `booking.<area>.<thing>` naming.

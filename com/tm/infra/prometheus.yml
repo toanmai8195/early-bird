@@ -17,3 +17,7 @@ scrape_configs:
   - job_name: loadtest-pg
     static_configs:
       - targets: ["loadtest-pg:9411"]
+
+  - job_name: loadtest-server
+    static_configs:
+      - targets: ["loadtest-server:9412"]

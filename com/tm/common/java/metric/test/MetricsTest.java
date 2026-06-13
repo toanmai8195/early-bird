@@ -24,6 +24,23 @@ public class MetricsTest {
     }
 
     @Test
+    public void counterWithInstanceIdAddsInstanceTag() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        Metrics metrics = new MicrometerMetrics(registry);
+
+        metrics.counter("booking.consumer.handle", "committed", "manager-0").increment();
+        metrics.counter("booking.consumer.handle", "committed", "manager-1").increment();
+        metrics.counter("booking.consumer.handle", "committed", "manager-1").increment();
+
+        assertEquals(1.0,
+                registry.get("booking.consumer.handle")
+                        .tag("result", "committed").tag("instance", "manager-0").counter().count(), 0.0001);
+        assertEquals(2.0,
+                registry.get("booking.consumer.handle")
+                        .tag("result", "committed").tag("instance", "manager-1").counter().count(), 0.0001);
+    }
+
+    @Test
     public void timerRecordsAndPublishesP99() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         Metrics metrics = new MicrometerMetrics(registry);

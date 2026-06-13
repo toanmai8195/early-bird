@@ -12,6 +12,7 @@ java_test(
         "//com/tm/common/java/redis",
         "//com/tm/services/manager/dao",
         "//com/tm/services/manager/handler",
+        "@maven//:io_github_resilience4j_resilience4j_circuitbreaker",
         "@maven//:io_micrometer_micrometer_core",
         "@maven//:io_vertx_vertx_core",
         "@maven//:junit_junit",

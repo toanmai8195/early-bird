@@ -5,7 +5,7 @@ import io.vertx.core.Future;
 /**
  * Rebuilds {@code opp_meta:{opp}} / {@code claimed_set:{opp}} in Redis from PG
  * for currently-open opportunities after a Redis restart/flush wipes its
- * in-memory dataset. PG is the source of truth (see CLAUDE.md "Redis chết");
+ * in-memory dataset. PG is the source of truth (see CLAUDE.md "Redis down");
  * without this, a missing {@code opp_meta:{opp}} makes
  * {@link com.tm.common.redis.ClaimGate#claim} return {@code CLOSED} for every
  * claim on an opportunity whose booking window is, per PG, actually open.

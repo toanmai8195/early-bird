@@ -97,7 +97,7 @@ var (
 	rampStepDur   = flag.Duration("ramp-step-dur", time.Minute, "how long to hold each rate level")
 	rampCapacity  = flag.Int("ramp-capacity", 10_000_000, "opp capacity per ramp step (large to avoid REJECTED noise)")
 	rampCooldown   = flag.Duration("ramp-cooldown", 15*time.Second, "pause between patterns so Grafana shows a clear gap")
-	rampBatchSize  = flag.Int("ramp-batch-size", 20, "drivers per CTE in contended pattern (mirrors manager bulk-settle)")
+	rampBatchSize  = flag.Int("ramp-batch-size", 10, "drivers per CTE in contended pattern (mirrors manager bulk-settle)")
 
 	region = flag.String("region", "lt", "region_id")
 	zone   = flag.String("zone", "lt", "zone_id")
@@ -259,7 +259,12 @@ func main() {
 	defer db.Close()
 	maxConns := min(*contendedOpps+*diverseOpps+100, 250)
 	db.SetMaxOpenConns(maxConns)
-	db.SetMaxIdleConns(maxConns / 2)
+	// Fully-warm pool, mirroring the manager's HikariCP config (PgPool.java sets
+	// minIdle == max): keep every connection open so connect-latency spikes don't
+	// show up mid-load. MaxIdle == MaxOpen avoids close/reopen churn when >half the
+	// pool is in use; ConnMaxLifetime=0 keeps idle connections from expiring.
+	db.SetMaxIdleConns(maxConns)
+	db.SetConnMaxLifetime(0)
 	if err := db.Ping(); err != nil {
 		log.Fatalf("ping PG: %v", err)
 	}
@@ -555,46 +560,58 @@ func runRamp(db *sql.DB, reg *lt.Reg, cte *cteReg, lat *latReg) {
 			}
 		}
 		var idx atomic.Int64
+		batch := *rampBatchSize
 		return func() {
+			drivers := make([]driverPair, batch)
+			for j := range drivers {
+				id, key := newDriver()
+				drivers[j] = driverPair{id, key}
+			}
 			i := int(idx.Add(1)-1) % poolSize
-			dID, iKey := newDriver()
-			settleOne(db, oppIDs[i], dID, iKey, reg, cte, "ramp-diverse")
+			settleMulti(db, oppIDs[i], drivers, reg, cte, "ramp-diverse")
 		}, nil, nil
 	})
 	cooldown()
 
-	// oversell: 1 opp capacity=rate/2; ~half requests will be REJECTED.
+	// oversell: 1 opp capacity=rate/2; each tick settles a batch → ~half COMMITTED rest REJECTED.
 	runPattern("oversell", func(rate int) (func(), func(), error) {
 		cap := max(rate/2, 1)
 		oppID := fmt.Sprintf("lt-ramp-o-%d", time.Now().UnixMilli())
 		if err := insertOpp(db, oppID, cap); err != nil {
 			return nil, nil, err
 		}
+		batch := *rampBatchSize
 		return func() {
-			dID, iKey := newDriver()
-			settleOne(db, oppID, dID, iKey, reg, cte, "ramp-oversell")
+			drivers := make([]driverPair, batch)
+			for j := range drivers {
+				id, key := newDriver()
+				drivers[j] = driverPair{id, key}
+			}
+			settleMulti(db, oppID, drivers, reg, cte, "ramp-oversell")
 		}, nil, nil
 	})
 	cooldown()
 
-	// idempotent: fixed driver pool replayed round-robin — measures dedup cost.
+	// idempotent: fixed driver pool, each tick replays a batch-sized window round-robin.
 	runPattern("idempotent", func(rate int) (func(), func(), error) {
-		batchSize := min(rate, *idempotentCapacity)
+		poolSize := min(rate**rampBatchSize, *idempotentCapacity)
 		oppID := fmt.Sprintf("lt-ramp-i-%d", time.Now().UnixMilli())
 		if err := insertOpp(db, oppID, *idempotentCapacity); err != nil {
 			return nil, nil, err
 		}
-		pool := make([]driverPair, batchSize)
+		pool := make([]driverPair, poolSize)
 		for i := range pool {
 			id, key := newDriver()
 			pool[i] = driverPair{id, key}
 		}
 		// Pre-settle once so subsequent calls hit the duplicate path.
 		settleMulti(db, oppID, pool, reg, cte, "ramp-idempotent")
+		batch := *rampBatchSize
 		var idx atomic.Int64
 		return func() {
-			i := int(idx.Add(1)-1) % batchSize
-			settleOne(db, oppID, pool[i].id, pool[i].iemKey, reg, cte, "ramp-idempotent")
+			start := int(idx.Add(int64(batch))-int64(batch)) % poolSize
+			end := min(start+batch, poolSize)
+			settleMulti(db, oppID, pool[start:end], reg, cte, "ramp-idempotent")
 		}, nil, nil
 	})
 

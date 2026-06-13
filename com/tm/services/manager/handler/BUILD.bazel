@@ -15,6 +15,7 @@ java_library(
         "//com/tm/common/java/redis",
         "//com/tm/services/manager/dao",
         "//tools/dagger",
+        "@maven//:io_github_resilience4j_resilience4j_circuitbreaker",
         "@maven//:io_vertx_vertx_core",
     ],
 )

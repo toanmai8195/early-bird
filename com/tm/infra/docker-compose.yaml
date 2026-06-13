@@ -27,11 +27,44 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
       KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      # More partitions → diverse/ramp workloads spread across partitions and
+      # scale linearly. Single hot-opp (gate test) still bottlenecks on 1
+      # partition by design (key=opp_id → same partition always).
+      KAFKA_NUM_PARTITIONS: "12"
+      KAFKA_NUM_NETWORK_THREADS: "4"
+      KAFKA_NUM_IO_THREADS: "8"
+      # Rely on OS page-cache for durability (single-node dev env, no replication).
+      KAFKA_LOG_FLUSH_INTERVAL_MESSAGES: "100000"
+      KAFKA_LOG_FLUSH_INTERVAL_MS: "5000"
     ports: ["9092:9092"]
 
   postgres:
     image: postgres:16-alpine
-    command: ["-c", "max_connections=300"]
+    # Tuned for the manager settle path: 200-500 autocommit CTE batches/sec.
+    command:
+      - "-c"
+      - "max_connections=300"
+      # Biggest single-node lever: don't block each commit on WAL fsync. A crash
+      # can lose the last few ms of commits, but bookings insert + remaining
+      # decrement live in the SAME txn so they revert together (no oversell), and
+      # the Redis pending-set + reconciliation replay them (at-least-once + UNIQUE).
+      - "-c"
+      - "synchronous_commit=off"
+      # Group commits within a 200us window so concurrent settles share WAL flushes.
+      - "-c"
+      - "commit_delay=200"
+      - "-c"
+      - "commit_siblings=5"
+      # More cache for the hot opportunities/bookings pages (25% of the 2g limit).
+      - "-c"
+      - "shared_buffers=512MB"
+      - "-c"
+      - "effective_cache_size=1536MB"
+      # Fewer/cheaper checkpoints under sustained writes.
+      - "-c"
+      - "max_wal_size=2GB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
     environment:
       POSTGRES_DB: earlybird
       POSTGRES_USER: earlybird
@@ -47,6 +80,9 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.54.1
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-lifecycle"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports: ["9090:9090"]
@@ -94,9 +130,22 @@ services:
       - "--metrics-addr=:9411"
       - "--run=ramp"
       - "--ramp-start-rate=100"
-      - "--ramp-step-size=100"
+      - "--ramp-step-size=50"
       - "--ramp-steps=5"
       - "--ramp-step-dur=2m"
+      - "--ramp-cooldown=15s"
+
+  loadtest-server:
+    image: early-bird/loadtest-server:latest
+    pull_policy: never
+    profiles: ["loadtest"]
+    depends_on: [server]
+    ports: ["9412:9412"]
+    command:
+      - "--server=http://server:8080"
+      - "--metrics-addr=:9412"
+      - "--run=ramp"
+      - "--ramp-step=2m"
       - "--ramp-cooldown=15s"
 
   # Bazel-built images (see `make server` / `make manager`); not pulled.
@@ -110,6 +159,7 @@ services:
       REDIS_URI: "redis://redis:6379"
       KAFKA_BROKERS: "kafka:9094"
       JDBC_URL: "jdbc:postgresql://postgres:5432/earlybird"
+      DISABLE_CIRCUIT_BREAKER: "${DISABLE_CIRCUIT_BREAKER:-false}"
 
   manager:
     image: early-bird/manager:latest
@@ -121,3 +171,6 @@ services:
       REDIS_URI: "redis://redis:6379"
       KAFKA_BROKERS: "kafka:9094"
       JDBC_URL: "jdbc:postgresql://postgres:5432/earlybird"
+      MAX_POLL_RECORDS: "${MAX_POLL_RECORDS:-2000}"
+      SETTLE_BATCH_SIZE: "${SETTLE_BATCH_SIZE:-200}"
+      DB_POOL_SIZE: "${DB_POOL_SIZE:-16}"

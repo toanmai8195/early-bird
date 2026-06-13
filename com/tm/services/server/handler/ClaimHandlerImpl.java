@@ -25,7 +25,12 @@ import javax.inject.Singleton;
  * the circuit opens and all requests are rejected with 503 (no degraded-pass-through).
  * PG's atomic decrement + UNIQUE remain the correctness backstop, but without the
  * Redis gate the fairness and fast-reject guarantees are lost, so we prefer to shed
- * load rather than silently degrade (see CLAUDE.md "Redis chết").
+ * load rather than silently degrade (see CLAUDE.md "Redis down").
+ *
+ * <p>The gate also carries a global PG-health kill switch: when the manager's PG
+ * circuit breaker opens it sets a Redis flag (see {@code PgHealth}), and the gate
+ * returns {@code DOWN} so this endpoint sheds claims with 503 until PG recovers and
+ * the manager clears the flag — keeping load off an unhealthy PG upstream of Kafka.
  *
  * <p>See .claude/rules/observability-metrics.md — the endpoint records a counter
  * tagged by outcome + a P99 latency timer.
@@ -71,17 +76,30 @@ public final class ClaimHandlerImpl implements ClaimHandler {
 
         claimViaGate(opportunityId, driverId)
                 .compose(outcome -> switch (outcome) {
-                    case OK -> producer.publish(new ClaimEvent(opportunityId, driverId, idempotencyKey))
-                            .map(v -> new Reply(202, "ACCEPTED", "ok"));
+                    case OK -> producer.publish(ClaimEvent.now(opportunityId, driverId, idempotencyKey))
+                            .map(v -> new Reply(202, "ACCEPTED", "ok"))
+                            .recover(err -> {
+                                System.err.printf("publish failed opp=%s driver=%s: %s: %s%n",
+                                        opportunityId, driverId,
+                                        err.getClass().getSimpleName(), err.getMessage());
+                                return gate.release(opportunityId, driverId)
+                                        .map(v -> new Reply(503, "UNAVAILABLE", "error"));
+                            });
                     case DUP -> Future.succeededFuture(new Reply(200, "ACCEPTED", "dup"));
                     case FULL -> Future.succeededFuture(new Reply(409, "FULL", "full"));
                     case CLOSED -> Future.succeededFuture(new Reply(409, "CLOSED", "closed"));
-                    case THROTTLED -> Future.succeededFuture(new Reply(503, "UNAVAILABLE", "throttled"));
+                    case DOWN -> Future.succeededFuture(new Reply(503, "PG_UNAVAILABLE", "down"));
+                    case THROTTLED -> Future.succeededFuture(new Reply(503, "THROTTLED", "throttled"));
                 })
                 .onComplete(ar -> {
+                    if (ar.failed()) {
+                        System.err.printf("claim pipeline failed opp=%s driver=%s: %s: %s%n",
+                                opportunityId, driverId,
+                                ar.cause().getClass().getSimpleName(), ar.cause().getMessage());
+                    }
                     Reply reply = ar.succeeded() ? ar.result() : new Reply(503, "UNAVAILABLE", "error");
                     metrics.counter(METRIC, reply.metric()).increment();
-                    sample.stop(metrics.timer(LATENCY));
+                    sample.stop(metrics.timer(LATENCY, reply.metric()));
                     ctx.response()
                             .setStatusCode(reply.status())
                             .putHeader("content-type", "application/json")
@@ -119,7 +137,7 @@ public final class ClaimHandlerImpl implements ClaimHandler {
     }
 
     private enum Outcome {
-        OK, FULL, DUP, CLOSED, THROTTLED;
+        OK, FULL, DUP, CLOSED, DOWN, THROTTLED;
 
         static Outcome from(ClaimGate.Result result) {
             return switch (result) {
@@ -127,6 +145,7 @@ public final class ClaimHandlerImpl implements ClaimHandler {
                 case FULL -> FULL;
                 case DUP -> DUP;
                 case CLOSED -> CLOSED;
+                case DOWN -> DOWN;
             };
         }
     }

@@ -4,7 +4,9 @@ java_library(
     name = "redis",
     srcs = [
         "ClaimGate.java",
+        "PgHealth.java",
         "VertxClaimGate.java",
+        "VertxPgHealth.java",
     ],
     visibility = ["//visibility:public"],
     deps = [

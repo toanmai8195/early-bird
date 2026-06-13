@@ -12,3 +12,16 @@ java_test(
         "@maven//:org_mockito_mockito_core",
     ],
 )
+
+java_test(
+    name = "PgHealthTest",
+    srcs = ["PgHealthTest.java"],
+    test_class = "com.tm.common.redis.PgHealthTest",
+    deps = [
+        "//com/tm/common/java/redis",
+        "@maven//:io_vertx_vertx_core",
+        "@maven//:io_vertx_vertx_redis_client",
+        "@maven//:junit_junit",
+        "@maven//:org_mockito_mockito_core",
+    ],
+)

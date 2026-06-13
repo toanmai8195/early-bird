@@ -1,6 +1,8 @@
 package com.tm.common.pg;
 
 import com.tm.common.kafka.ClaimEvent;
+import com.tm.common.metric.Metrics;
+import io.micrometer.core.instrument.Timer;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -32,12 +34,24 @@ import javax.inject.Singleton;
 @Singleton
 public final class PgClaimStore implements ClaimStore {
 
+    // Per-driver outcome counter (one increment per claim, incl. intra-batch dups).
+    private static final String METRIC = "booking.pg.settle";
+    // Per-batch counter: one increment per settleOpportunity() call (one sub-batch /
+    // one SQL round-trip), tagged ok/error. Pairs with LATENCY (also per-batch).
+    private static final String BATCH_METRIC = "booking.pg.settle.batch";
+    private static final String LATENCY = "booking.pg.settle.latency";
+
+    private final Metrics metrics;
+
     @Inject
-    public PgClaimStore() {}
+    public PgClaimStore(Metrics metrics) {
+        this.metrics = metrics;
+    }
 
     @Override
     public List<Outcome> settleOpportunity(Connection conn, String opportunityId, List<ClaimEvent> events)
             throws SQLException {
+        Timer.Sample sample = Timer.start();
         // Dedup driver (preserve arrival order), keeping the first idempotency key.
         LinkedHashMap<String, String> driverIdem = new LinkedHashMap<>();
         for (ClaimEvent e : events) {
@@ -60,12 +74,21 @@ public final class PgClaimStore implements ClaimStore {
                     byDriver.put(rs.getString(1), Outcome.valueOf(rs.getString(2)));
                 }
             }
+        } catch (SQLException e) {
+            sample.stop(metrics.timer(LATENCY));
+            metrics.counter(METRIC, "error").increment();
+            metrics.counter(BATCH_METRIC, "error").increment();
+            throw e;
         }
+        sample.stop(metrics.timer(LATENCY));
+        metrics.counter(BATCH_METRIC, "ok").increment();
 
         // Map each event (incl. intra-batch duplicates) to its driver's outcome.
         List<Outcome> result = new ArrayList<>(events.size());
         for (ClaimEvent e : events) {
-            result.add(byDriver.get(e.driverId()));
+            Outcome o = byDriver.get(e.driverId());
+            metrics.counter(METRIC, o.name().toLowerCase()).increment();
+            result.add(o);
         }
         return result;
     }

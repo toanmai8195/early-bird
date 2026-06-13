@@ -1,29 +1,36 @@
 package com.tm.services.manager.di;
 
 import com.tm.common.kafka.KafkaClients;
+import com.tm.common.pg.PgPool;
 import com.tm.common.metric.Metrics;
 import com.tm.common.metric.MicrometerMetrics;
+import com.tm.common.redis.PgHealth;
 import com.tm.services.manager.config.ManagerConfig;
 import dagger.Module;
 import dagger.Provides;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
+import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.WorkerExecutor;
 import io.vertx.redis.client.Redis;
 import io.vertx.redis.client.RedisAPI;
+import io.vertx.redis.client.RedisOptions;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.postgresql.ds.PGSimpleDataSource;
 
+import java.time.Duration;
+import javax.inject.Named;
 import javax.inject.Singleton;
 import javax.sql.DataSource;
 
 /**
  * Dagger bindings for third-party types only. Everything we own
  * (BookingDao, ClaimHandler, ConsumerRunner) is constructor-injected via
- * {@code @Inject}, so it never appears here. {@link ManagerConfig} is bound via
- * the component factory.
+ * {@code @Inject}, so it never appears here. {@link ManagerConfig},
+ * {@link PrometheusMeterRegistry}, {@link Vertx}, and the instance ID are bound
+ * via the component factory.
  */
 @Module
 public final class ManagerModule {
@@ -31,14 +38,14 @@ public final class ManagerModule {
     private ManagerModule() {}
 
     @Provides
-    @Singleton
-    static PrometheusMeterRegistry prometheusMeterRegistry() {
-        return new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+    static MeterRegistry meterRegistry(PrometheusMeterRegistry registry) {
+        return registry;
     }
 
     @Provides
-    static MeterRegistry meterRegistry(PrometheusMeterRegistry registry) {
-        return registry;
+    @Named("settleBatchSize")
+    static int settleBatchSize(ManagerConfig config) {
+        return config.settleBatchSize();
     }
 
     @Provides
@@ -50,21 +57,12 @@ public final class ManagerModule {
     @Provides
     @Singleton
     static DataSource dataSource(ManagerConfig config) {
-        // Each getConnection() opens its own physical connection, so concurrent
-        // settles (one per opportunity, see JdbcBookingDao) get distinct
-        // connections. A production deployment should front this with a real
-        // JDBC pool (e.g. HikariCP) sized to ManagerConfig#dbPoolSize.
-        PGSimpleDataSource ds = new PGSimpleDataSource();
-        ds.setUrl(config.jdbcUrl());
-        ds.setUser(config.jdbcUser());
-        ds.setPassword(config.jdbcPassword());
-        return ds;
-    }
-
-    @Provides
-    @Singleton
-    static Vertx vertx() {
-        return Vertx.vertx();
+        // Pooled connections (see PgPool): each settle (one per opportunity, see
+        // JdbcBookingDao) borrows and returns a connection instead of opening a
+        // fresh socket every time. Sized to dbPoolSize, matching the
+        // "pg-claim-store" worker pool so every worker has a connection ready.
+        return PgPool.dataSource(config.jdbcUrl(), config.jdbcUser(), config.jdbcPassword(),
+                config.dbPoolSize(), "pg-claim-store");
     }
 
     /** Worker pool for parallel per-opportunity JDBC settles (blocking work off the event loop). */
@@ -80,9 +78,54 @@ public final class ManagerModule {
         return KafkaClients.consumer(config.kafkaBrokers(), config.groupId(), config.maxPollRecords());
     }
 
+    /**
+     * Trips OPEN when PG settles keep failing or running slow (&gt;5s), so the consumer
+     * fast-fails the batch instead of piling more load onto an unhealthy PG. While OPEN
+     * the Kafka offset isn't committed, so events redeliver once the breaker half-opens.
+     * Enabled by default; {@code --disable-circuit-breaker} forces it DISABLED.
+     *
+     * <p>State transitions are mirrored to the Redis {@link PgHealth} kill switch:
+     * OPEN marks PG down (the server's gate sheds claims), CLOSED clears it (server
+     * resumes). OPEN re-fires on every failed half-open probe, refreshing the flag's
+     * TTL while PG stays down.
+     */
+    @Provides
+    @Singleton
+    static CircuitBreaker pgCircuitBreaker(ManagerConfig config, PgHealth pgHealth) {
+        CircuitBreakerConfig cbConfig = CircuitBreakerConfig.custom()
+                .failureRateThreshold(50)
+                .slowCallRateThreshold(50)
+                .slowCallDurationThreshold(Duration.ofSeconds(5))
+                .slidingWindowSize(50)
+                .minimumNumberOfCalls(5)
+                .waitDurationInOpenState(Duration.ofSeconds(10))
+                .build();
+        CircuitBreaker cb = CircuitBreaker.of("pg-settle", cbConfig);
+        if (config.disableCircuitBreaker()) {
+            cb.transitionToDisabledState();
+        }
+        cb.getEventPublisher().onStateTransition(event -> {
+            CircuitBreaker.State to = event.getStateTransition().getToState();
+            Future<Void> flag = switch (to) {
+                case OPEN, FORCED_OPEN -> pgHealth.markDown();
+                case CLOSED -> pgHealth.markUp();
+                default -> null;
+            };
+            if (flag != null) {
+                flag.onFailure(err -> System.err.printf(
+                        "pg_health update on breaker %s failed: %s%n", to, err.getMessage()));
+            }
+        });
+        return cb;
+    }
+
     @Provides
     @Singleton
     static RedisAPI redisApi(Vertx vertx, ManagerConfig config) {
-        return RedisAPI.api(Redis.createClient(vertx, config.redisUri()));
+        RedisOptions opts = new RedisOptions()
+                .setConnectionString(config.redisUri())
+                .setMaxPoolSize(4)
+                .setMaxWaitingHandlers(512);
+        return RedisAPI.api(Redis.createClient(vertx, opts));
     }
 }

@@ -131,6 +131,36 @@ public class ClaimHandlerImplTest {
     }
 
     @Test
+    public void pgDownReturns503WithoutPublishing() {
+        when(gate.claim("opp-1", "driver-1")).thenReturn(Future.succeededFuture(ClaimGate.Result.DOWN));
+
+        handler.handle(ctx);
+
+        Mockito.verify(producer, Mockito.never()).publish(any());
+        Mockito.verify(response).setStatusCode(503);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(response).end(body.capture());
+        assertTrue(body.getValue().contains("PG_UNAVAILABLE"));
+        assertCounter("down", 1.0);
+    }
+
+    @Test
+    public void kafkaFailReleasesSlotAndReturns503() {
+        when(gate.claim("opp-1", "driver-1")).thenReturn(Future.succeededFuture(ClaimGate.Result.OK));
+        when(producer.publish(any())).thenReturn(Future.failedFuture(new RuntimeException("broker down")));
+        when(gate.release("opp-1", "driver-1")).thenReturn(Future.succeededFuture());
+
+        handler.handle(ctx);
+
+        Mockito.verify(gate).release("opp-1", "driver-1");
+        Mockito.verify(response).setStatusCode(503);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(response).end(body.capture());
+        assertTrue(body.getValue().contains("UNAVAILABLE"));
+        assertCounter("error", 1.0);
+    }
+
+    @Test
     public void circuitOpenReturns503WithoutCallingGateOrProducer() {
         circuitBreaker.transitionToOpenState();
 
@@ -139,6 +169,11 @@ public class ClaimHandlerImplTest {
         Mockito.verify(gate, Mockito.never()).claim(any(), any());
         Mockito.verify(producer, Mockito.never()).publish(any());
         Mockito.verify(response).setStatusCode(503);
+        // Body must say THROTTLED (not UNAVAILABLE) so clients can distinguish a
+        // circuit-breaker throttle from a real server-side error — both are 503.
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(response).end(body.capture());
+        assertTrue(body.getValue().contains("THROTTLED"));
         assertCounter("throttled", 1.0);
     }
 
