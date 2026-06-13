@@ -1,0 +1,200 @@
+{
+  "title": "Loadtest — PG Claim Store",
+  "uid": "loadtest-pg",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "tags": ["loadtest"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Claim rate by result (all scenarios)",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } } },
+      "options": { "legend": { "displayMode": "table", "placement": "right" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "sum by (scenario, result) (rate(loadtest_pg_claims_total[30s]))",
+          "legendFormat": "{{scenario}} / {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "CTE rate by scenario (executions/s)",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } } },
+      "options": { "legend": { "displayMode": "table", "placement": "right" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "sum by (scenario) (rate(loadtest_pg_cte_total[30s]))",
+          "legendFormat": "{{scenario}}"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "bargauge",
+      "title": "CTE latency p99 per scenario",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.05 }, { "color": "red", "value": 0.2 }] },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] }, "displayMode": "gradient" },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_latency_p99_seconds", "legendFormat": "{{scenario}}" }]
+    },
+    {
+      "id": 22,
+      "type": "bargauge",
+      "title": "CTE latency p50 per scenario",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.02 }, { "color": "red", "value": 0.1 }] },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] }, "displayMode": "gradient" },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_latency_p50_seconds", "legendFormat": "{{scenario}}" }]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "CTE latency p50 / p99 / max over time",
+      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*p50.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*p99.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*max.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "red",    "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right" } },
+      "targets": [
+        { "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_latency_p50_seconds", "legendFormat": "{{scenario}} p50" },
+        { "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_latency_p99_seconds", "legendFormat": "{{scenario}} p99" },
+        { "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_latency_max_seconds", "legendFormat": "{{scenario}} max" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Throughput — contended (committed / duplicate / rejected / error)",
+      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "committed" }, "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "duplicate" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "rejected"  }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "error"     }, "properties": [{ "id": "color", "value": { "fixedColor": "red",    "mode": "fixed" } }] }
+        ]
+      },
+      "targets": [
+        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"contended\",result=\"committed\"}[30s])", "legendFormat": "committed" },
+        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"contended\",result=\"duplicate\"}[30s])", "legendFormat": "duplicate" },
+        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"contended\",result=\"rejected\"}[30s])",  "legendFormat": "rejected" },
+        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"contended\",result=\"error\"}[30s])",     "legendFormat": "error" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Throughput — diverse (req/s)",
+      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "committed" }, "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "duplicate" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "rejected"  }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "error"     }, "properties": [{ "id": "color", "value": { "fixedColor": "red",    "mode": "fixed" } }] }
+        ]
+      },
+      "targets": [
+        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"diverse\",result=\"committed\"}[30s])", "legendFormat": "committed" },
+        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"diverse\",result=\"duplicate\"}[30s])", "legendFormat": "duplicate" },
+        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"diverse\",result=\"rejected\"}[30s])",  "legendFormat": "rejected" },
+        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"diverse\",result=\"error\"}[30s])",     "legendFormat": "error" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Oversell violations (must be 0)",
+      "gridPos": { "x": 0, "y": 38, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_oversell_violations_total", "legendFormat": "violations" }]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Idempotent violations (must be 0)",
+      "gridPos": { "x": 6, "y": 38, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_idempotent_violations_total", "legendFormat": "violations" }]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Oversell — total committed",
+      "gridPos": { "x": 12, "y": 38, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "green" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_claims_total{scenario=\"oversell\",result=\"committed\"}", "legendFormat": "committed" }]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Oversell — total rejected (backstop working)",
+      "gridPos": { "x": 18, "y": 38, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "orange" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_claims_total{scenario=\"oversell\",result=\"rejected\"}", "legendFormat": "rejected" }]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Idempotent — committed",
+      "gridPos": { "x": 0, "y": 42, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "green" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_claims_total{scenario=\"idempotent\",result=\"committed\"}", "legendFormat": "committed" }]
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Idempotent — duplicate (at-least-once absorbed)",
+      "gridPos": { "x": 6, "y": 42, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "purple" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_claims_total{scenario=\"idempotent\",result=\"duplicate\"}", "legendFormat": "duplicate" }]
+    }
+  ]
+}

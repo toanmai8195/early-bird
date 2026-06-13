@@ -8,6 +8,10 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "2gb", "--maxmemory-policy", "noeviction"]
     ports: ["6379:6379"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
 
   kafka:
     image: apache/kafka:3.8.0
@@ -27,6 +31,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    command: ["-c", "max_connections=300"]
     environment:
       POSTGRES_DB: earlybird
       POSTGRES_USER: earlybird
@@ -34,6 +39,11 @@ services:
     ports: ["5432:5432"]
     volumes:
       - ./migrations:/docker-entrypoint-initdb.d:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 2g
 
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -64,7 +74,7 @@ services:
     command:
       - "--redis=redis:6379"
       - "--metrics-addr=:9410"
-      - "--run=gate"
+      - "--run=all"
       - "--pool=500"
       - "--gate-requests=10000000"
       - "--capacity=1000000"
@@ -82,6 +92,12 @@ services:
     command:
       - "--pg=postgres://earlybird:earlybird@postgres:5432/earlybird?sslmode=disable"
       - "--metrics-addr=:9411"
+      - "--run=ramp"
+      - "--ramp-start-rate=100"
+      - "--ramp-step-size=100"
+      - "--ramp-steps=5"
+      - "--ramp-step-dur=2m"
+      - "--ramp-cooldown=15s"
 
   # Bazel-built images (see `make server` / `make manager`); not pulled.
   server:

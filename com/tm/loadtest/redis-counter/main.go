@@ -9,9 +9,10 @@
 //
 // ── gate ────────────────────────────────────────────────────────────────────
 // Correctness test for the capacity gate.  Three-way check:
-//   1. Local tally  — what our goroutines observed per response label.
-//   2. Redis SCARD  — ground truth: how many drivers entered claimed_set.
-//   3. Prometheus   — what /metrics exposes after the run.
+//  1. Local tally  — what our goroutines observed per response label.
+//  2. Redis SCARD  — ground truth: how many drivers entered claimed_set.
+//  3. Prometheus   — what /metrics exposes after the run.
+//
 // All three must agree.  The test also asserts no overselling and correct
 // dup/full counts.
 //
@@ -75,7 +76,7 @@ var (
 	closedN    = flag.Int("closed-requests", 2_000, "total requests for closed test")
 
 	poolSize    = flag.Int("pool", 500, "Redis connection pool size (also = worker count)")
-	rampStepDur = flag.Duration("ramp-step", 5*time.Second, "duration of each ramp step")
+	rampStepDur = flag.Duration("ramp-step", 2*time.Minute, "duration of each ramp step")
 	workers     = flag.Int("workers", 0, "worker goroutines for ramp (0 = 4×NumCPU)")
 )
 
@@ -175,7 +176,7 @@ func (r *latReg) text() string {
 
 // ── RAMP TEST ─────────────────────────────────────────────────────────────────
 
-var rampLevels = []int{500, 1_000, 2_000, 5_000, 10_000, 20_000, 50_000}
+var rampLevels = []int{500, 1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000}
 
 func rampTest(pool *redisPool, reg *lt.Reg, lats *latReg) {
 	fmt.Println()
@@ -771,7 +772,7 @@ func newPool(addr string, size int) (*redisPool, error) {
 	return p, nil
 }
 
-func (p *redisPool) get() *redisConn { return <-p.conns }
+func (p *redisPool) get() *redisConn  { return <-p.conns }
 func (p *redisPool) put(c *redisConn) { p.conns <- c }
 
 func dial(addr string) (*redisConn, error) {
