@@ -14,9 +14,11 @@ public interface ClaimGate {
 
     /**
      * OK = slot acquired, FULL = capacity reached, DUP = idempotent retry,
-     * CLOSED = booking window not currently open.
+     * CLOSED = booking window not currently open, DOWN = PG unhealthy
+     * (manager's circuit breaker open, see {@link PgHealth}) so the gate sheds
+     * the claim before touching opportunity state.
      */
-    enum Result { OK, FULL, DUP, CLOSED }
+    enum Result { OK, FULL, DUP, CLOSED, DOWN }
 
     /**
      * Runs the atomic gate for one (opportunity, driver) pair. {@code capacity}
@@ -31,8 +33,19 @@ public interface ClaimGate {
 
     /**
      * Reverses a previously accepted claim, freeing the slot for other drivers.
-     * Used by the manager when the downstream PG settle fails for this
-     * (opportunity, driver), so the Redis count stays consistent with PG.
+     * Used by the manager when the downstream PG settle fails entirely (nothing
+     * committed), so the Redis count stays consistent with PG and Kafka replay
+     * can re-admit the same drivers.
      */
     Future<Void> release(String opportunityId, String driverId);
+
+    /**
+     * Removes the driver from {@code claimed_set} AND decrements
+     * {@code opp_meta.capacity} by 1. Used when PG permanently rejects a driver
+     * (remaining was already 0 when the CTE ran). Unlike {@link #release}, which
+     * re-opens the slot for new drivers, {@code reject} closes it permanently so
+     * the gate returns FULL without letting in a replacement driver that PG would
+     * reject again.
+     */
+    Future<Void> reject(String opportunityId, String driverId);
 }

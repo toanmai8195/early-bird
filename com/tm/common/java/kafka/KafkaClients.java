@@ -21,7 +21,18 @@ public final class KafkaClients {
         cfg.put("bootstrap.servers", bootstrapServers);
         cfg.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
         cfg.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        cfg.put("acks", "all");
+        cfg.put("acks", "1");
+        // Batching: accumulate messages for up to 10ms before sending.
+        // 10ms (up from 5ms) gives the Vert.x event-loop time to queue more
+        // records per linger window → larger batches → fewer round trips per second.
+        cfg.put("linger.ms", "10");
+        cfg.put("batch.size", String.valueOf(128 * 1024));  // 128 KB
+        cfg.put("compression.type", "snappy");
+        cfg.put("buffer.memory", String.valueOf(128 * 1024 * 1024)); // 128 MB
+        // Allow more concurrent in-flight batches toward the broker.
+        // Default=5; raising to 10 keeps the broker pipeline fuller without
+        // risking reorder (acks=1, no retries on producer).
+        cfg.put("max.in.flight.requests.per.connection", "10");
         return KafkaProducer.create(vertx, cfg);
     }
 

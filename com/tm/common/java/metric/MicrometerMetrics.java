@@ -24,7 +24,17 @@ public final class MicrometerMetrics implements Metrics {
     }
 
     @Override
+    public Counter counter(String name, String result, String instanceId) {
+        return Counter.builder(name).tag("result", result).tag("instance", instanceId).register(registry);
+    }
+
+    @Override
     public Timer timer(String name) {
         return Timer.builder(name).publishPercentiles(0.99).register(registry);
+    }
+
+    @Override
+    public Timer timer(String name, String result) {
+        return Timer.builder(name).tag("result", result).publishPercentiles(0.99).register(registry);
     }
 }

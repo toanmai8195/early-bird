@@ -16,7 +16,10 @@ CREATE TABLE opportunities (
 
 CREATE TABLE bookings (
     booking_id       BIGSERIAL PRIMARY KEY,
-    opportunity_id   TEXT NOT NULL REFERENCES opportunities (opportunity_id),
+    -- ON DELETE CASCADE: deleting an opportunity drops its bookings too, so the
+    -- DELETE /opportunities/{id} admin op doesn't trip the FK (handler also clears
+    -- opp_meta + claimed_set in Redis). Booking history is expendable on opp delete.
+    opportunity_id   TEXT NOT NULL REFERENCES opportunities (opportunity_id) ON DELETE CASCADE,
     driver_id        TEXT NOT NULL,
     idempotency_key  TEXT NOT NULL,
     status           TEXT NOT NULL,

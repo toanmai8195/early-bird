@@ -8,6 +8,7 @@ import io.vertx.core.Future;
 import io.vertx.core.WorkerExecutor;
 
 import java.sql.Connection;
+import java.sql.Statement;
 import java.util.List;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -27,6 +28,8 @@ public final class JdbcBookingDao implements BookingDao {
 
     private static final String METRIC = "booking.dao.commit";
     private static final String LATENCY = "booking.dao.commit.latency";
+    private static final String PING_METRIC = "booking.dao.ping";
+    private static final String PING_LATENCY = "booking.dao.ping.latency";
 
     private final DataSource dataSource;
     private final ClaimStore claimStore;
@@ -60,6 +63,21 @@ public final class JdbcBookingDao implements BookingDao {
             } else {
                 metrics.counter(METRIC, "error").increment();
             }
+        });
+    }
+
+    @Override
+    public Future<Void> ping() {
+        Timer.Sample sample = Timer.start();
+        return workerExecutor.<Void>executeBlocking(() -> {
+            try (Connection conn = dataSource.getConnection();
+                 Statement st = conn.createStatement()) {
+                st.execute("SELECT 1");
+                return null;
+            }
+        }, false).onComplete(ar -> {
+            sample.stop(metrics.timer(PING_LATENCY));
+            metrics.counter(PING_METRIC, ar.succeeded() ? "ok" : "error").increment();
         });
     }
 }

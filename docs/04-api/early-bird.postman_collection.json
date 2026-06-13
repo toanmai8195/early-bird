@@ -1,0 +1,278 @@
+{
+  "info": {
+    "name": "Early Bird — Booking Claim System",
+    "description": "API collection for the Early Bird booking claim system. Import this file into Postman, then set the `baseUrl` variable to your server address. Claim requests pass driver_id / idempotency_key via the X-Driver-Id and X-Idempotency-Key headers; opportunity windows are epoch seconds.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "oppId",
+      "value": "opp-demo-1",
+      "type": "string"
+    },
+    {
+      "key": "driverId",
+      "value": "driver-001",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Opportunity",
+      "item": [
+        {
+          "name": "Create opportunity",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/opportunities/{{oppId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["opportunities", "{{oppId}}"]
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"region_id\": \"hanoi\",\n  \"zone_id\": \"zone-1\",\n  \"capacity\": 1000,\n  \"booking_window_start\": 1767225600,\n  \"booking_window_end\": 4102444799\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('returns opportunity', () => pm.expect(b).to.have.property('remaining'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get opportunity",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/opportunities/{{oppId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["opportunities", "{{oppId}}"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('has remaining', () => pm.expect(b).to.have.property('remaining'));",
+                  "pm.test('remaining >= 0', () => pm.expect(b.remaining).to.be.at.least(0));",
+                  "pm.test('window is epoch seconds', () => pm.expect(b.booking_window_start).to.be.a('number'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update opportunity",
+          "request": {
+            "method": "PUT",
+            "url": {
+              "raw": "{{baseUrl}}/opportunities/{{oppId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["opportunities", "{{oppId}}"]
+            },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"region_id\": \"hanoi\",\n  \"zone_id\": \"zone-1\",\n  \"capacity\": 2000,\n  \"booking_window_start\": 1767225600,\n  \"booking_window_end\": 4102444799\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete opportunity",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/opportunities/{{oppId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["opportunities", "{{oppId}}"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Booking",
+      "item": [
+        {
+          "name": "Claim slot (new driver)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/opportunities/{{oppId}}/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["opportunities", "{{oppId}}", "bookings"]
+            },
+            "header": [
+              { "key": "X-Driver-Id", "value": "{{driverId}}" },
+              { "key": "X-Idempotency-Key", "value": "{{$guid}}" }
+            ]
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200/202/409', () => pm.expect([200,202,409]).to.include(pm.response.code));",
+                  "const b = pm.response.json();",
+                  "pm.test('status is ACCEPTED / FULL', () => {",
+                  "  pm.expect(['ACCEPTED','FULL']).to.include(b.status);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Claim slot (dup — same driver)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/opportunities/{{oppId}}/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["opportunities", "{{oppId}}", "bookings"]
+            },
+            "header": [
+              { "key": "X-Driver-Id", "value": "{{driverId}}" },
+              { "key": "X-Idempotency-Key", "value": "{{$guid}}" }
+            ]
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Same driverId already in claimed_set -> gate returns DUP (200).",
+                  "pm.test('status 200/202/409', () => pm.expect([200,202,409]).to.include(pm.response.code));",
+                  "const b = pm.response.json();",
+                  "pm.test('status is ACCEPTED (dup) / FULL', () => {",
+                  "  pm.expect(['ACCEPTED','FULL']).to.include(b.status);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Claim slot (closed window)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/opportunities/opp-closed-test/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["opportunities", "opp-closed-test", "bookings"]
+            },
+            "header": [
+              { "key": "X-Driver-Id", "value": "driver-999" },
+              { "key": "X-Idempotency-Key", "value": "{{$guid}}" }
+            ]
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Create a closed-window opportunity first (epoch seconds, window in the past).",
+                  "pm.sendRequest({",
+                  "  url: pm.collectionVariables.get('baseUrl') + '/opportunities/opp-closed-test',",
+                  "  method: 'POST',",
+                  "  header: { 'Content-Type': 'application/json' },",
+                  "  body: {",
+                  "    mode: 'raw',",
+                  "    raw: JSON.stringify({",
+                  "      region_id: 'hanoi', zone_id: 'zone-1', capacity: 100,",
+                  "      booking_window_start: 1577836800,",
+                  "      booking_window_end:   1577840400",
+                  "    })",
+                  "  }",
+                  "}, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 409 (closed)', () => pm.response.to.have.status(409));",
+                  "const b = pm.response.json();",
+                  "pm.test('status is CLOSED', () => pm.expect(b.status).to.eql('CLOSED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

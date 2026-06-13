@@ -6,7 +6,10 @@ java_test(
     test_class = "com.tm.common.pg.ClaimStoreTest",
     deps = [
         "//com/tm/common/java/kafka",
+        "//com/tm/common/java/metric",
         "//com/tm/common/java/pg",
+        "@maven//:io_micrometer_micrometer_core",
+        "@maven//:io_micrometer_micrometer_registry_prometheus",
         "@maven//:junit_junit",
         "@maven//:org_mockito_mockito_core",
     ],

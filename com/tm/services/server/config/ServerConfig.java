@@ -14,14 +14,15 @@ public final class ServerConfig {
     public static ServerConfig load(String[] args) {
         Config config = Config.from(args)
                 .with("port", "PORT", "8080")
+                .with("metrics-port", "METRICS_PORT", "9404")
                 .with("redis-uri", "REDIS_URI", "redis://localhost:6379")
                 .with("kafka-brokers", "KAFKA_BROKERS", "localhost:9092")
-                .with("capacity", "CAPACITY", "1000")
                 .with("jdbc-url", "JDBC_URL", "jdbc:postgresql://localhost:5432/earlybird")
                 .with("jdbc-user", "JDBC_USER", "earlybird")
                 .with("jdbc-password", "JDBC_PASSWORD", "earlybird")
                 .with("db-pool-size", "DB_POOL_SIZE", "4")
                 .with("redis-warmup-interval-ms", "REDIS_WARMUP_INTERVAL_MS", "5000")
+                .with("disable-circuit-breaker", "DISABLE_CIRCUIT_BREAKER", "false")
                 .build();
         return new ServerConfig(config);
     }
@@ -30,17 +31,17 @@ public final class ServerConfig {
         return config.getInt("port");
     }
 
+    /** Port for the Prometheus {@code /metrics} scrape endpoint. */
+    public int metricsPort() {
+        return config.getInt("metrics-port");
+    }
+
     public String redisUri() {
         return config.get("redis-uri");
     }
 
     public String kafkaBrokers() {
         return config.get("kafka-brokers");
-    }
-
-    /** Cap on throughput while the Redis gate circuit is OPEN (degraded mode). */
-    public int capacity() {
-        return config.getInt("capacity");
     }
 
     public String jdbcUrl() {
@@ -58,6 +59,11 @@ public final class ServerConfig {
     /** Worker pool size for opportunity-CRUD JDBC ops. */
     public int dbPoolSize() {
         return config.getInt("db-pool-size");
+    }
+
+    /** When true, Redis circuit breaker is forced to DISABLED state (for load testing). */
+    public boolean disableCircuitBreaker() {
+        return config.getBool("disable-circuit-breaker");
     }
 
     /**

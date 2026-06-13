@@ -1,0 +1,13 @@
+load("//bazel:oci.bzl", "go_image")
+
+go_image(
+    name = "pg",
+    srcs = ["main.go"],
+    importpath = "github.com/tm/loadtest/pg",
+    deps = [
+        "//com/tm/loadtest/lt",
+        "@com_github_lib_pq//:go_default_library",
+    ],
+    exposed_ports = ["9411"],
+    repo_tag = "early-bird/loadtest-pg:latest",
+)

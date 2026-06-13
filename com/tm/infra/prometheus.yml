@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: server
+    static_configs:
+      - targets: ["server:9404"]
+
+  - job_name: manager
+    static_configs:
+      - targets: ["manager:9404"]
+
+  - job_name: loadtest-redis-counter
+    static_configs:
+      - targets: ["loadtest-redis-counter:9410"]
+
+  - job_name: loadtest-pg
+    static_configs:
+      - targets: ["loadtest-pg:9411"]
+
+  - job_name: loadtest-server
+    static_configs:
+      - targets: ["loadtest-server:9412"]

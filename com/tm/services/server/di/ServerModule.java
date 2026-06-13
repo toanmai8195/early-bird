@@ -6,15 +6,15 @@ import dagger.Module;
 import dagger.Provides;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
-import io.github.resilience4j.ratelimiter.RateLimiter;
-import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.vertx.core.Vertx;
 import io.vertx.core.WorkerExecutor;
 import io.vertx.kafka.client.producer.KafkaProducer;
 import io.vertx.redis.client.Redis;
 import io.vertx.redis.client.RedisAPI;
+import io.vertx.redis.client.RedisOptions;
 import org.postgresql.ds.PGSimpleDataSource;
 
 import java.time.Duration;
@@ -39,14 +39,28 @@ public final class ServerModule {
 
     @Provides
     @Singleton
-    static MeterRegistry meterRegistry() {
-        return new SimpleMeterRegistry();
+    static PrometheusMeterRegistry prometheusMeterRegistry() {
+        return new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+    }
+
+    @Provides
+    static MeterRegistry meterRegistry(PrometheusMeterRegistry registry) {
+        return registry;
     }
 
     @Provides
     @Singleton
     static RedisAPI redisApi(Vertx vertx, ServerConfig config) {
-        return RedisAPI.api(Redis.createClient(vertx, config.redisUri()));
+        RedisOptions opts = new RedisOptions()
+                .setConnectionString(config.redisUri())
+                // Single hot opp bursts ~2K rps onto the gate; 4 connections with the
+                // default 24-deep acquire queue overflow (ConnectionPoolTooBusyException).
+                // More connections + a deeper acquire queue absorb the burst. The gate is
+                // single-key Lua (~100K ops/s capable), so Redis itself is not the limit.
+                .setMaxPoolSize(24)
+                .setMaxPoolWaiting(1024)
+                .setMaxWaitingHandlers(2048);
+        return RedisAPI.api(Redis.createClient(vertx, opts));
     }
 
     @Provides
@@ -79,28 +93,18 @@ public final class ServerModule {
      */
     @Provides
     @Singleton
-    static CircuitBreaker redisCircuitBreaker() {
+    static CircuitBreaker redisCircuitBreaker(ServerConfig config) {
         CircuitBreakerConfig cbConfig = CircuitBreakerConfig.custom()
                 .failureRateThreshold(50)
-                .slidingWindowSize(20)
+                .slidingWindowSize(100)
+                .minimumNumberOfCalls(50)
                 .waitDurationInOpenState(Duration.ofSeconds(5))
                 .build();
-        return CircuitBreaker.of("redis-gate", cbConfig);
+        CircuitBreaker cb = CircuitBreaker.of("redis-gate", cbConfig);
+        if (config.disableCircuitBreaker()) {
+            cb.transitionToDisabledState();
+        }
+        return cb;
     }
 
-    /**
-     * While the Redis gate circuit is OPEN, throttles claims locally so we don't
-     * overwhelm Kafka/PG with unmetered traffic. PG's atomic decrement + UNIQUE
-     * remain the correctness backstop while this is active.
-     */
-    @Provides
-    @Singleton
-    static RateLimiter redisDegradeLimiter(ServerConfig config) {
-        RateLimiterConfig rlConfig = RateLimiterConfig.custom()
-                .limitForPeriod(config.capacity())
-                .limitRefreshPeriod(Duration.ofSeconds(1))
-                .timeoutDuration(Duration.ZERO)
-                .build();
-        return RateLimiter.of("redis-degrade", rlConfig);
-    }
 }

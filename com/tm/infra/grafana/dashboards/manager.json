@@ -55,7 +55,7 @@
       "title": "Consumer handle rate (booking.consumer.handle)",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Counter booking_consumer_handle_total, tách theo result (committed/duplicate/rejected/error).",
+      "description": "Counter booking_consumer_handle_total, tách theo result (committed/duplicate/rejected/error/circuit_open). circuit_open = PG circuit breaker OPEN, batch fast-fail không chạm PG.",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "targets": [
@@ -95,6 +95,38 @@
           "refId": "A",
           "expr": "sum by (result) (rate(booking_consumer_notify_total[1m]))",
           "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "PG liveness probe rate (booking.dao.ping)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Counter booking_dao_ping_total, tách theo result (ok/error). PgHealthProbe ping SELECT 1 theo timer khi circuit breaker OPEN để phát hiện PG hồi phục độc lập traffic; ok → breaker đóng → server nhận request lại.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(booking_dao_ping_total[1m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "PG liveness probe latency P99 (booking.dao.ping.latency)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Timer booking_dao_ping_latency_seconds, percentile P99 (publishPercentiles(0.99)).",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "booking_dao_ping_latency_seconds{quantile=\"0.99\"}",
+          "legendFormat": "p99"
         }
       ]
     }

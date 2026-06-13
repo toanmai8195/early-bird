@@ -5,11 +5,15 @@ java_library(
     srcs = [
         "ClaimStore.java",
         "PgClaimStore.java",
+        "PgPool.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//com/tm/common/java/kafka",
+        "//com/tm/common/java/metric",
         "//tools/dagger",
+        "@maven//:com_zaxxer_HikariCP",
+        "@maven//:io_micrometer_micrometer_core",
     ],
     runtime_deps = ["@maven//:org_postgresql_postgresql"],
 )

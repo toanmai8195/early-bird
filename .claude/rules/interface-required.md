@@ -5,20 +5,20 @@ paths:
   - "com/tm/services/**/dao/**"
 ---
 
-# Interface bắt buộc cho dao / handler / common
+# Interface required for dao / handler / common
 
-Mọi `dao`, `handler`, và mọi thư viện **có hành vi** trong `com/tm/common` PHẢI expose qua
-**interface**, không để code khác phụ thuộc trực tiếp vào class implementation.
+Every `dao`, `handler`, and every library **with behavior** in `com/tm/common` MUST be exposed via
+an **interface**; don't let other code depend directly on an implementation class.
 
-**Miễn trừ:** pure data/value types (record, DTO, enum — vd `ClaimEvent`, `result.Outcome`,
-`result.Tally`) KHÔNG cần interface.
+**Exemption:** pure data/value types (records, DTOs, enums — e.g. `ClaimEvent`, `result.Outcome`,
+`result.Tally`) do NOT need an interface.
 
-## Quy ước
-- Định nghĩa interface (vd `BookingDao`, `ClaimHandler`, `IClaimStore`) + một class
-  implementation (vd `JdbcBookingDao`, `ClaimHandlerImpl`, `PgClaimStore`).
-- Dependency của component/handler khác chỉ tham chiếu **interface**, không tham chiếu
-  class impl.
-- **Dagger**: bind interface → impl bằng `@Binds` (ưu tiên, gọn hơn `@Provides`):
+## Convention
+- Define an interface (e.g. `BookingDao`, `ClaimHandler`, `IClaimStore`) + one implementation
+  class (e.g. `JdbcBookingDao`, `ClaimHandlerImpl`, `PgClaimStore`).
+- Other components'/handlers' dependencies reference only the **interface**, never the
+  implementation class.
+- **Dagger**: bind interface → impl with `@Binds` (preferred, more concise than `@Provides`):
   ```java
   @Module
   interface ManagerBindings {
@@ -26,12 +26,12 @@ Mọi `dao`, `handler`, và mọi thư viện **có hành vi** trong `com/tm/com
       @Binds @Singleton ClaimHandler claimHandler(ClaimHandlerImpl impl);
   }
   ```
-  Impl giữ `@Inject` constructor; interface không cần annotation.
-- **Common**: target export interface ở public; impl có thể cùng `java_library` hoặc
-  tách target tùy mức độ tái sử dụng.
+  The impl keeps the `@Inject` constructor; the interface needs no annotation.
+- **Common**: the target exports the interface publicly; the impl can live in the same
+  `java_library` or a separate target depending on how reusable it is.
 
-## Lý do
-- Test mock theo interface, không phụ thuộc impl (khớp rule unit-test).
-- Cho phép thay impl (vd in-memory cho test, JDBC cho prod) mà không đổi call site.
+## Rationale
+- Tests mock against the interface, not the impl (matching the unit-test rule).
+- Allows swapping the impl (e.g. in-memory for tests, JDBC for prod) without changing call sites.
 
-Không thêm/sửa dao, handler, hay common stack mà thiếu interface tương ứng.
+Do not add/change a dao, handler, or common stack without a corresponding interface.

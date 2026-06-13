@@ -1,5 +1,6 @@
 package com.tm.services.server;
 
+import com.tm.common.metric.MetricsServer;
 import com.tm.services.server.config.ServerConfig;
 import com.tm.services.server.handler.ClaimHandler;
 import com.tm.services.server.handler.OpportunityHandler;
@@ -16,27 +17,31 @@ import javax.inject.Inject;
  * {@link ServerConfig#port()}. Business logic lives in {@link ClaimHandler}
  * (claim endpoint) and {@link OpportunityHandler} (opportunity CRUD). Also
  * runs {@link RedisWarmupService} periodically to self-heal Redis state lost
- * to a restart.
+ * to a restart, and starts {@link MetricsServer} for Prometheus scraping.
  */
 public class BookingVerticle extends AbstractVerticle {
 
     private final ClaimHandler claimHandler;
     private final OpportunityHandler opportunityHandler;
     private final RedisWarmupService redisWarmupService;
+    private final MetricsServer metricsServer;
     private final ServerConfig config;
 
     @Inject
     public BookingVerticle(ClaimHandler claimHandler, OpportunityHandler opportunityHandler,
-                            RedisWarmupService redisWarmupService, ServerConfig config) {
+                            RedisWarmupService redisWarmupService, MetricsServer metricsServer,
+                            ServerConfig config) {
         this.claimHandler = claimHandler;
         this.opportunityHandler = opportunityHandler;
         this.redisWarmupService = redisWarmupService;
+        this.metricsServer = metricsServer;
         this.config = config;
     }
 
     @Override
     public void start(Promise<Void> startPromise) {
         vertx.setPeriodic(config.redisWarmupIntervalMs(), id -> redisWarmupService.reconcile());
+        metricsServer.start(config.metricsPort());
 
         Router router = Router.router(vertx);
         router.route().handler(BodyHandler.create());

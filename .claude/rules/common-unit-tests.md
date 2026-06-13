@@ -5,38 +5,38 @@ paths:
   - "com/tm/services/**/dao/**"
 ---
 
-# Unit test bắt buộc
+# Unit tests required
 
-Phải có unit test đi kèm cho:
-- Mọi target trong `com/tm/common` (bất kỳ `java_library` / `go_library` nào).
-- Mọi `handler/` và `dao/` trong từng service `com/tm/services/<svc>/` — đây là nơi
-  chứa business logic (xử lý event/request và truy cập dữ liệu) nên bắt buộc test.
+Accompanying unit tests are required for:
+- Every target in `com/tm/common` (any `java_library` / `go_library`).
+- Every `handler/` and `dao/` in each service `com/tm/services/<svc>/` — this is where the
+  business logic lives (handling events/requests and accessing data), so tests are mandatory.
 
-(Các tầng wiring như `config/`, `di/`, `Main`, verticle/poll-loop không bắt buộc test.)
+(Wiring layers like `config/`, `di/`, `Main`, and the verticle/poll-loop are not required to be tested.)
 
-## Vị trí & build
-- Test đặt trong thư mục con **`test/`** của chính target đó, **build riêng** bằng
-  một `BUILD.bazel` riêng trong `test/` (không để chung BUILD với library).
+## Location & build
+- Tests live in the target's own **`test/`** subfolder, **built separately** via
+  a dedicated `BUILD.bazel` inside `test/` (don't share a BUILD with the library).
 - Layout:
   ```
   com/tm/common/java/pg/
     ClaimStore.java
-    BUILD.bazel          # chỉ java_library
+    BUILD.bazel          # java_library only
     test/
       ClaimStoreTest.java
-      BUILD.bazel        # chỉ java_test, deps tới //com/tm/common/java/pg
+      BUILD.bazel        # java_test only, deps on //com/tm/common/java/pg
   ```
 
-## Quy ước
-- **Java**: `test/<Name>Test.java` + `java_test` trong `test/BUILD.bazel`
-  (JUnit4 `@maven//:junit_junit`, mock bằng `@maven//:org_mockito_mockito_core`).
-- **Go**: `test/<name>_test.go` (package `<pkg>_test`, import library qua importpath)
-  + `go_test` trong `test/BUILD.bazel`.
-- Cùng layout cho service: `com/tm/services/<svc>/dao/test/...`,
+## Convention
+- **Java**: `test/<Name>Test.java` + `java_test` in `test/BUILD.bazel`
+  (JUnit4 `@maven//:junit_junit`, mocking via `@maven//:org_mockito_mockito_core`).
+- **Go**: `test/<name>_test.go` (package `<pkg>_test`, importing the library via its importpath)
+  + `go_test` in `test/BUILD.bazel`.
+- Same layout for services: `com/tm/services/<svc>/dao/test/...`,
   `com/tm/services/<svc>/handler/test/...`.
 - **Verify**: `bazel test --build_tests_only //com/tm/common/... //com/tm/services/...`
-  phải xanh trước khi coi là xong (cờ `--build_tests_only` để khỏi build kèm OCI image
-  target cho nhanh / khỏi cần network).
+  must be green before considering it done (the `--build_tests_only` flag avoids building the OCI
+  image targets, for speed / to avoid needing network).
 
-Nếu một class cần I/O ngoài (Redis/PG/Kafka) thì tách logic thuần ra để test trực tiếp,
-hoặc dùng mock / embedded; không được bỏ test vì "cần hạ tầng".
+If a class needs external I/O (Redis/PG/Kafka), extract the pure logic to test it directly,
+or use a mock / embedded instance; do not skip tests because they "need infrastructure".

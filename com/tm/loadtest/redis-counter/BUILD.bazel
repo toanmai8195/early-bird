@@ -1,0 +1,10 @@
+load("//bazel:oci.bzl", "go_image")
+
+go_image(
+    name = "redis_counter",
+    srcs = ["main.go"],
+    importpath = "github.com/tm/loadtest/redis-counter",
+    deps = ["//com/tm/loadtest/lt"],
+    exposed_ports = ["9410"],
+    repo_tag = "early-bird/loadtest-redis-counter:latest",
+)

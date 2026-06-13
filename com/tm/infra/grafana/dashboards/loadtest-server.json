@@ -1,0 +1,618 @@
+{
+  "title": "Loadtest: Server (Full Flow)",
+  "uid": "early-bird-lt-server",
+  "tags": [
+    "early-bird",
+    "loadtest"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 200,
+      "title": "HTTP API (Server)",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false
+    },
+    {
+      "id": 4,
+      "title": "API Claim Rate (booking.api.claim)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Rate of claim requests handled by the server, broken down by result (ok/full/dup/closed/throttled/error).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(booking_api_claim_total[1m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "API Claim Latency P99 (booking.api.claim.latency)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "P99 end-to-end latency of POST /opportunities/:id/bookings (Redis gate + Kafka publish).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "booking_api_claim_latency_seconds{quantile=\"0.99\"}",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 300,
+      "title": "Kafka",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "collapsed": false
+    },
+    {
+      "id": 6,
+      "title": "Kafka Publish Rate (via API ok — booking.api.claim{result=ok})",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Each API ok result means one message was successfully published to Kafka. Divergence between this and consumer handle rate reveals consumer lag or backpressure.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(booking_api_claim_total{result=\"ok\"}[1m])",
+          "legendFormat": "published (api ok)"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Consumer Handle Rate per Instance (booking.consumer.handle)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Rate of Kafka messages consumed and settled by each manager instance. Two lines (manager-0 / manager-1) show partition distribution across consumer group members.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance, result) (rate(booking_consumer_handle_total[1m]))",
+          "legendFormat": "{{instance}} {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 400,
+      "title": "Redis Gate",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "collapsed": false
+    },
+    {
+      "id": 8,
+      "title": "Gate Outcome Rate (via API results)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Redis gate outcomes derived from server API results: ok=gate passed, full=SCARD>=capacity, dup=already in claimed_set, closed=window closed, throttled=circuit breaker open.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(booking_api_claim_total{result=~\"ok|full|dup|closed|throttled\"}[1m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Gate Release/Reject Rate per Instance (booking.consumer.gate_release)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Rate of Redis slot operations by the manager: reject() = SREM+HINCRBY on PG REJECTED (permanent slot closure); release() = SREM on PG failure (temporary, allows Kafka retry).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance, result) (rate(booking_consumer_gate_release_total[1m]))",
+          "legendFormat": "{{instance}} {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 500,
+      "title": "PG",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "title": "DAO Commit Rate per Instance (booking.dao.commit)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Rate of PG settle operations per manager instance, broken down by outcome (committed/duplicate/rejected/error). Instance tag shows work distribution.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (instance, result) (rate(booking_dao_commit_total[1m]))",
+          "legendFormat": "{{instance}} {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "DAO Commit Latency P99 (booking.dao.commit.latency)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "P99 CTE settle latency in PG. High values here indicate PG lock contention on hot opportunities.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "booking_dao_commit_latency_seconds{quantile=\"0.99\"}",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "PG Settle Rate per Batch (booking.pg.settle.batch)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Số SQL round-trip settle/giây (mỗi lần settleOpportunity() = một sub-batch ≤ SETTLE_BATCH_SIZE = một row-lock), tách theo ok/error. So với DAO commit rate (per-driver): tỉ lệ ≈ batch size hiệu dụng. Trong pattern contended, đây là số lần chạm row opportunities hot.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ok"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(booking_pg_settle_batch_total[1m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "PG Settle Latency P99 per Batch (booking.pg.settle.latency)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "P99 thời gian thuần thực thi CTE settle trong PG, đo THEO BATCH. Khi tune SETTLE_BATCH_SIZE lên, theo dõi giá trị này: tăng tuyến tính nhẹ là OK, phình super-linear = chi phí plan CTE trên VALUES list lớn vượt lợi ích gộp round-trip.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "booking_pg_settle_latency_seconds{quantile=\"0.99\"}",
+          "legendFormat": "p99 / batch"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Consumer Notify Rate (booking.consumer.notify)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Rate of driver notifications dispatched (confirmed/duplicate/failed). Mirrors settle outcomes; used to verify notification pipeline health.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(booking_consumer_notify_total[1m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 600,
+      "title": "End-to-end latency",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "collapsed": false
+    },
+    {
+      "id": 14,
+      "title": "API latency P99 by status (booking.api.claim.latency)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "P99 server-side latency of POST /opportunities/:id/bookings tách theo result (ok/dup/full/closed/error/throttled). ok bao gồm Redis gate + Kafka publish; dup/full/closed chỉ bao gồm Redis gate.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 53
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ok"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dup"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "full"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "throttled"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "booking_api_claim_latency_seconds{quantile=\"0.99\"}",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "E2E notify latency P99 by status (booking.e2e.notify.latency)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "P99 latency từ khi server nhận HTTP request (serverReceivedAt trong ClaimEvent) đến khi manager gọi notify() — bao gồm Kafka lag + PG settle. confirmed = booking thành công; failed = PG settle lỗi hoặc REJECTED; duplicate = Kafka replay.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 53
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "confirmed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duplicate"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "booking_e2e_notify_latency_seconds{quantile=\"0.99\"}",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    }
+  ]
+}

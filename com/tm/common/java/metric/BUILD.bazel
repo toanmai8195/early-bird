@@ -4,11 +4,15 @@ java_library(
     name = "metric",
     srcs = [
         "Metrics.java",
+        "MetricsServer.java",
         "MicrometerMetrics.java",
+        "PrometheusMetricsServer.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//tools/dagger",
         "@maven//:io_micrometer_micrometer_core",
+        "@maven//:io_micrometer_micrometer_registry_prometheus",
+        "@maven//:io_vertx_vertx_core",
     ],
 )

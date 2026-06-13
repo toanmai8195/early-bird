@@ -18,7 +18,7 @@
       "title": "Claim API rate (booking.api.claim)",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Counter booking_api_claim_total, tách theo result (ok/dup/full/error).",
+      "description": "Counter booking_api_claim_total, tách theo result (ok/dup/full/closed/down/throttled/error). down = PG health kill switch bật (manager CB open) → gate shed claim với 503.",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "targets": [

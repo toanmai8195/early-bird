@@ -12,14 +12,11 @@ import com.tm.common.metric.MicrometerMetrics;
 import com.tm.common.redis.ClaimGate;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
-import io.github.resilience4j.ratelimiter.RateLimiter;
-import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.vertx.core.Future;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.ext.web.RoutingContext;
-import java.time.Duration;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
@@ -32,7 +29,6 @@ public class ClaimHandlerImplTest {
     private SimpleMeterRegistry registry;
     private Metrics metrics;
     private CircuitBreaker circuitBreaker;
-    private RateLimiter degradeLimiter;
     private ClaimHandlerImpl handler;
 
     private RoutingContext ctx;
@@ -46,12 +42,7 @@ public class ClaimHandlerImplTest {
         registry = new SimpleMeterRegistry();
         metrics = new MicrometerMetrics(registry);
         circuitBreaker = CircuitBreaker.of("test-gate", CircuitBreakerConfig.ofDefaults());
-        degradeLimiter = RateLimiter.of("test-degrade", RateLimiterConfig.custom()
-                .limitForPeriod(1000)
-                .limitRefreshPeriod(Duration.ofSeconds(1))
-                .timeoutDuration(Duration.ZERO)
-                .build());
-        handler = new ClaimHandlerImpl(gate, producer, metrics, circuitBreaker, degradeLimiter);
+        handler = new ClaimHandlerImpl(gate, producer, metrics, circuitBreaker);
 
         ctx = mock(RoutingContext.class);
         request = mock(HttpServerRequest.class);
@@ -140,15 +131,50 @@ public class ClaimHandlerImplTest {
     }
 
     @Test
-    public void circuitOpenDegradesAndStillPublishes() {
+    public void pgDownReturns503WithoutPublishing() {
+        when(gate.claim("opp-1", "driver-1")).thenReturn(Future.succeededFuture(ClaimGate.Result.DOWN));
+
+        handler.handle(ctx);
+
+        Mockito.verify(producer, Mockito.never()).publish(any());
+        Mockito.verify(response).setStatusCode(503);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(response).end(body.capture());
+        assertTrue(body.getValue().contains("PG_UNAVAILABLE"));
+        assertCounter("down", 1.0);
+    }
+
+    @Test
+    public void kafkaFailReleasesSlotAndReturns503() {
+        when(gate.claim("opp-1", "driver-1")).thenReturn(Future.succeededFuture(ClaimGate.Result.OK));
+        when(producer.publish(any())).thenReturn(Future.failedFuture(new RuntimeException("broker down")));
+        when(gate.release("opp-1", "driver-1")).thenReturn(Future.succeededFuture());
+
+        handler.handle(ctx);
+
+        Mockito.verify(gate).release("opp-1", "driver-1");
+        Mockito.verify(response).setStatusCode(503);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(response).end(body.capture());
+        assertTrue(body.getValue().contains("UNAVAILABLE"));
+        assertCounter("error", 1.0);
+    }
+
+    @Test
+    public void circuitOpenReturns503WithoutCallingGateOrProducer() {
         circuitBreaker.transitionToOpenState();
 
         handler.handle(ctx);
 
         Mockito.verify(gate, Mockito.never()).claim(any(), any());
-        Mockito.verify(producer).publish(any());
-        Mockito.verify(response).setStatusCode(202);
-        assertCounter("degraded", 1.0);
+        Mockito.verify(producer, Mockito.never()).publish(any());
+        Mockito.verify(response).setStatusCode(503);
+        // Body must say THROTTLED (not UNAVAILABLE) so clients can distinguish a
+        // circuit-breaker throttle from a real server-side error — both are 503.
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(response).end(body.capture());
+        assertTrue(body.getValue().contains("THROTTLED"));
+        assertCounter("throttled", 1.0);
     }
 
     private void assertCounter(String result, double expected) {

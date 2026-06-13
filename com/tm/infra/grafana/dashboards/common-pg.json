@@ -1,0 +1,84 @@
+{
+  "title": "common — PG Claim Store",
+  "uid": "early-bird-common-pg",
+  "tags": ["early-bird", "common:pg"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "PG settle rate per driver (booking.pg.settle)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Counter booking_pg_settle_total — đếm THEO TÀI XẾ (mỗi claim/event một lần, kể cả duplicate trong cùng batch), tách theo result (committed/duplicate/rejected/error). Đây là throughput claim thực sự được settle ở tầng SQL.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "ops" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "committed" }, "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "duplicate" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "rejected"  }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "error"     }, "properties": [{ "id": "color", "value": { "fixedColor": "red",    "mode": "fixed" } }] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(booking_pg_settle_total[1m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "PG settle rate per batch (booking.pg.settle.batch)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Counter booking_pg_settle_batch_total — đếm THEO BATCH (mỗi lần settleOpportunity() = một sub-batch ≤10 claim = một SQL round-trip), tách theo ok/error. So với panel per-driver: tỉ lệ driver/batch ≈ batch size hiệu dụng.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "ops" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "ok"    }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "error" }, "properties": [{ "id": "color", "value": { "fixedColor": "red",   "mode": "fixed" } }] }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(booking_pg_settle_batch_total[1m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "PG settle latency P99 per batch (booking.pg.settle.latency)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Timer booking_pg_settle_latency_seconds, percentile P99 — đo THEO BATCH (một lần record cho mỗi settleOpportunity() call), thời gian thuần thực thi CTE trong PG (không gồm chờ worker thread hay connection). Ngưỡng tham chiếu: <50ms OK, >200ms cần điều tra.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "booking_pg_settle_latency_seconds{quantile=\"0.99\"}",
+          "legendFormat": "P99 / batch"
+        }
+      ]
+    }
+  ]
+}
