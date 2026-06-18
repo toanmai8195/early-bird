@@ -3,6 +3,7 @@ package com.tm.common.metric;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.Test;
 
@@ -24,20 +25,35 @@ public class MetricsTest {
     }
 
     @Test
-    public void counterWithInstanceIdAddsInstanceTag() {
+    public void counterWithTagsAddsInstanceAndCallerTags() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         Metrics metrics = new MicrometerMetrics(registry);
 
-        metrics.counter("booking.consumer.handle", "committed", "manager-0").increment();
-        metrics.counter("booking.consumer.handle", "committed", "manager-1").increment();
-        metrics.counter("booking.consumer.handle", "committed", "manager-1").increment();
+        metrics.counter("booking.consumer.handle",
+                Tags.of("result", "committed", "instance", "manager-0", "caller", "contended")).increment();
+        metrics.counter("booking.consumer.handle",
+                Tags.of("result", "committed", "instance", "manager-1", "caller", "diverse")).increment();
+        metrics.counter("booking.consumer.handle",
+                Tags.of("result", "committed", "instance", "manager-1", "caller", "diverse")).increment();
 
         assertEquals(1.0,
                 registry.get("booking.consumer.handle")
-                        .tag("result", "committed").tag("instance", "manager-0").counter().count(), 0.0001);
+                        .tag("result", "committed").tag("instance", "manager-0").tag("caller", "contended").counter().count(), 0.0001);
         assertEquals(2.0,
                 registry.get("booking.consumer.handle")
-                        .tag("result", "committed").tag("instance", "manager-1").counter().count(), 0.0001);
+                        .tag("result", "committed").tag("instance", "manager-1").tag("caller", "diverse").counter().count(), 0.0001);
+    }
+
+    @Test
+    public void timerWithTagsPublishesP99() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        Metrics metrics = new MicrometerMetrics(registry);
+
+        metrics.timer("booking.pg.settle.latency", Tags.of("caller", "diverse"))
+                .record(java.time.Duration.ofMillis(5));
+
+        var timer = registry.get("booking.pg.settle.latency").tag("caller", "diverse").timer();
+        assertEquals(1, timer.count());
     }
 
     @Test

@@ -1,200 +1,284 @@
 {
-  "title": "Loadtest — PG Claim Store",
+  "title": "Loadtest \u2014 PG Claim Store",
   "uid": "loadtest-pg",
   "schemaVersion": 39,
   "refresh": "5s",
-  "time": { "from": "now-30m", "to": "now" },
-  "tags": ["loadtest"],
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "tags": [
+    "loadtest"
+  ],
   "panels": [
     {
-      "id": 1,
-      "type": "timeseries",
-      "title": "Claim rate by result (all scenarios)",
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
-      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } } },
-      "options": { "legend": { "displayMode": "table", "placement": "right" } },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus" },
-          "expr": "sum by (scenario, result) (rate(loadtest_pg_claims_total[30s]))",
-          "legendFormat": "{{scenario}} / {{result}}"
-        }
-      ]
+      "id": 100,
+      "type": "row",
+      "title": "Ramp \u2014 batch \u00d7 traffic sweep",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
     },
     {
-      "id": 30,
+      "id": 101,
       "type": "timeseries",
-      "title": "CTE rate by scenario (executions/s)",
-      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
-      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } } },
-      "options": { "legend": { "displayMode": "table", "placement": "right" } },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus" },
-          "expr": "sum by (scenario) (rate(loadtest_pg_cte_total[30s]))",
-          "legendFormat": "{{scenario}}"
-        }
-      ]
-    },
-    {
-      "id": 21,
-      "type": "bargauge",
-      "title": "CTE latency p99 per scenario",
-      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 6 },
+      "title": "Traffic \u2014 target rate (loadtest_pg_ramp_rate)",
+      "description": "Offered load for the current step: CTE/s the ticker dispatches. Sweeps the rates in --ramp-rates for each batch size.",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 12,
+        "h": 7
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.05 }, { "color": "red", "value": 0.2 }] },
-          "color": { "mode": "thresholds" }
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "lineInterpolation": "stepAfter"
+          }
         }
       },
-      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] }, "displayMode": "gradient" },
-      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_latency_p99_seconds", "legendFormat": "{{scenario}}" }]
-    },
-    {
-      "id": 22,
-      "type": "bargauge",
-      "title": "CTE latency p50 per scenario",
-      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 6 },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.02 }, { "color": "red", "value": 0.1 }] },
-          "color": { "mode": "thresholds" }
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "expr": "loadtest_pg_ramp_rate",
+          "legendFormat": "target CTE/s"
         }
-      },
-      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] }, "displayMode": "gradient" },
-      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_latency_p50_seconds", "legendFormat": "{{scenario}}" }]
-    },
-    {
-      "id": 20,
-      "type": "timeseries",
-      "title": "CTE latency p50 / p99 / max over time",
-      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 8 },
-      "fieldConfig": {
-        "defaults": { "unit": "s", "custom": { "lineWidth": 2 } },
-        "overrides": [
-          { "matcher": { "id": "byRegexp", "options": ".*p50.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
-          { "matcher": { "id": "byRegexp", "options": ".*p99.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
-          { "matcher": { "id": "byRegexp", "options": ".*max.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "red",    "mode": "fixed" } }] }
-        ]
-      },
-      "options": { "legend": { "displayMode": "table", "placement": "right" } },
-      "targets": [
-        { "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_latency_p50_seconds", "legendFormat": "{{scenario}} p50" },
-        { "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_latency_p99_seconds", "legendFormat": "{{scenario}} p99" },
-        { "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_latency_max_seconds", "legendFormat": "{{scenario}} max" }
       ]
     },
     {
-      "id": 2,
+      "id": 102,
       "type": "timeseries",
-      "title": "Throughput — contended (committed / duplicate / rejected / error)",
-      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 8 },
-      "fieldConfig": {
-        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } },
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "committed" }, "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "duplicate" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "rejected"  }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "error"     }, "properties": [{ "id": "color", "value": { "fixedColor": "red",    "mode": "fixed" } }] }
-        ]
+      "title": "Batch size \u2014 drivers/CTE (loadtest_pg_ramp_batch)",
+      "description": "Current batch size (drivers settled per CTE). The outer sweep steps it through --ramp-batch-sizes; each value runs all traffic steps.",
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 12,
+        "h": 7
       },
-      "targets": [
-        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"contended\",result=\"committed\"}[30s])", "legendFormat": "committed" },
-        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"contended\",result=\"duplicate\"}[30s])", "legendFormat": "duplicate" },
-        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"contended\",result=\"rejected\"}[30s])",  "legendFormat": "rejected" },
-        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"contended\",result=\"error\"}[30s])",     "legendFormat": "error" }
-      ]
-    },
-    {
-      "id": 3,
-      "type": "timeseries",
-      "title": "Throughput — diverse (req/s)",
-      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 8 },
-      "fieldConfig": {
-        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } },
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "committed" }, "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "duplicate" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "rejected"  }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "error"     }, "properties": [{ "id": "color", "value": { "fixedColor": "red",    "mode": "fixed" } }] }
-        ]
-      },
-      "targets": [
-        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"diverse\",result=\"committed\"}[30s])", "legendFormat": "committed" },
-        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"diverse\",result=\"duplicate\"}[30s])", "legendFormat": "duplicate" },
-        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"diverse\",result=\"rejected\"}[30s])",  "legendFormat": "rejected" },
-        { "datasource": { "type": "prometheus" }, "expr": "rate(loadtest_pg_claims_total{scenario=\"diverse\",result=\"error\"}[30s])",     "legendFormat": "error" }
-      ]
-    },
-    {
-      "id": 10,
-      "type": "stat",
-      "title": "Oversell violations (must be 0)",
-      "gridPos": { "x": 0, "y": 38, "w": 6, "h": 4 },
       "fieldConfig": {
         "defaults": {
           "unit": "none",
           "decimals": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] },
-          "color": { "mode": "thresholds" }
+          "custom": {
+            "lineWidth": 2,
+            "lineInterpolation": "stepAfter"
+          }
         }
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_oversell_violations_total", "legendFormat": "violations" }]
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "expr": "loadtest_pg_ramp_batch",
+          "legendFormat": "drivers/CTE"
+        }
+      ]
     },
     {
-      "id": 11,
-      "type": "stat",
-      "title": "Idempotent violations (must be 0)",
-      "gridPos": { "x": 6, "y": 38, "w": 6, "h": 4 },
+      "id": 103,
+      "type": "timeseries",
+      "title": "CTE traffic \u2014 CTE/s by batch (loadtest_pg_ramp_cte_total)",
+      "description": "Bulk-settle CTEs per second (one per settleRamp call = one FOR UPDATE round-trip), split by batch size. On a hot row this is what serialises.",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
-          "decimals": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] },
-          "color": { "mode": "thresholds" }
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2
+          }
         }
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_idempotent_violations_total", "legendFormat": "violations" }]
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "expr": "sum by (batch) (rate(loadtest_pg_ramp_cte_total{batch=~\"$batch\"}[30s]))",
+          "legendFormat": "batch={{batch}}"
+        }
+      ]
     },
     {
-      "id": 12,
-      "type": "stat",
-      "title": "Oversell — total committed",
-      "gridPos": { "x": 12, "y": 38, "w": 6, "h": 4 },
-      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "green" } } },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_claims_total{scenario=\"oversell\",result=\"committed\"}", "legendFormat": "committed" }]
+      "id": 104,
+      "type": "timeseries",
+      "title": "Driver traffic \u2014 drivers/s by batch (loadtest_pg_ramp_claims_total)",
+      "description": "Drivers settled per second (= CTE/s \u00d7 batch), split by batch size. Shows how a bigger batch lifts driver throughput on the same hot row.",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "expr": "sum by (batch) (rate(loadtest_pg_ramp_claims_total{batch=~\"$batch\"}[30s]))",
+          "legendFormat": "batch={{batch}}"
+        }
+      ]
     },
     {
-      "id": 13,
-      "type": "stat",
-      "title": "Oversell — total rejected (backstop working)",
-      "gridPos": { "x": 18, "y": 38, "w": 6, "h": 4 },
-      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "orange" } } },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_claims_total{scenario=\"oversell\",result=\"rejected\"}", "legendFormat": "rejected" }]
-    },
-    {
-      "id": 14,
-      "type": "stat",
-      "title": "Idempotent — committed",
-      "gridPos": { "x": 0, "y": 42, "w": 6, "h": 4 },
-      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "green" } } },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_claims_total{scenario=\"idempotent\",result=\"committed\"}", "legendFormat": "committed" }]
-    },
-    {
-      "id": 15,
-      "type": "stat",
-      "title": "Idempotent — duplicate (at-least-once absorbed)",
-      "gridPos": { "x": 6, "y": 42, "w": 6, "h": 4 },
-      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "purple" } } },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "targets": [{ "datasource": { "type": "prometheus" }, "expr": "loadtest_pg_claims_total{scenario=\"idempotent\",result=\"duplicate\"}", "legendFormat": "duplicate" }]
+      "id": 105,
+      "type": "timeseries",
+      "title": "CTE latency by batch \u2014 p50 / p99 / max (loadtest_pg_ramp_latency)",
+      "description": "Per-CTE settle latency by batch size. Watch p99 grow as batch grows: sub-linear is the win (round-trip amortised), super-linear = CTE planning on a large VALUES list dominating.",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*p50.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*p99.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*max.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "expr": "loadtest_pg_ramp_latency_p50_seconds{batch=~\"$batch\"}",
+          "legendFormat": "batch={{batch}} p50"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "expr": "loadtest_pg_ramp_latency_p99_seconds{batch=~\"$batch\"}",
+          "legendFormat": "batch={{batch}} p99"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "expr": "loadtest_pg_ramp_latency_max_seconds{batch=~\"$batch\"}",
+          "legendFormat": "batch={{batch}} max"
+        }
+      ]
     }
-  ]
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "batch",
+        "label": "Batch size",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus"
+        },
+        "query": {
+          "query": "label_values(loadtest_pg_ramp_cte_total, batch)",
+          "refId": "batch"
+        },
+        "refresh": 2,
+        "sort": 3,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ],
+          "selected": true
+        }
+      }
+    ]
+  }
 }

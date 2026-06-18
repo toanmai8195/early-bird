@@ -16,6 +16,7 @@ java_library(
         "//com/tm/services/manager/dao",
         "//tools/dagger",
         "@maven//:io_github_resilience4j_resilience4j_circuitbreaker",
+        "@maven//:io_micrometer_micrometer_core",
         "@maven//:io_vertx_vertx_core",
     ],
 )

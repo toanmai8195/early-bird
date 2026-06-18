@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../groot"
+		},
+		{
+			"path": "../hulk"
+		}
+	],
+	"settings": {}
+}

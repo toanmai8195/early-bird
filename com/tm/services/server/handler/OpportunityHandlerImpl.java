@@ -3,6 +3,7 @@ package com.tm.services.server.handler;
 import com.tm.common.metric.Metrics;
 import com.tm.services.server.dao.Opportunity;
 import com.tm.services.server.dao.OpportunityDao;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.RoutingContext;
@@ -117,8 +118,12 @@ public final class OpportunityHandlerImpl implements OpportunityHandler {
     }
 
     private void respond(RoutingContext ctx, Timer.Sample sample, int status, String result, JsonObject body) {
-        metrics.counter(METRIC, result).increment();
-        sample.stop(metrics.timer(LATENCY));
+        // CRUD is setup traffic, not a claim scenario: caller from X-Caller-Id if the
+        // client sets it, else "system" so it's distinguishable from scenario traffic.
+        String caller = ctx.request().getHeader("X-Caller-Id");
+        Tags tags = Tags.of("result", result, "caller", caller == null || caller.isBlank() ? "system" : caller);
+        metrics.counter(METRIC, tags).increment();
+        sample.stop(metrics.timer(LATENCY, tags));
         ctx.response().setStatusCode(status);
         if (body == null) {
             ctx.response().end();

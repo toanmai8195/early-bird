@@ -38,8 +38,8 @@ public class ClaimHandlerTest {
         metrics = new MicrometerMetrics(registry);
         dao = Mockito.mock(BookingDao.class);
         gate = Mockito.mock(ClaimGate.class);
-        when(gate.release(Mockito.any(), Mockito.any())).thenReturn(Future.succeededFuture());
-        when(gate.reject(Mockito.any(), Mockito.any())).thenReturn(Future.succeededFuture());
+        when(gate.releaseAll(Mockito.any(), Mockito.any())).thenReturn(Future.succeededFuture());
+        when(gate.rejectAll(Mockito.any(), Mockito.any())).thenReturn(Future.succeededFuture());
     }
 
     @Test
@@ -98,9 +98,7 @@ public class ClaimHandlerTest {
         ClaimHandler handler = new ClaimHandlerImpl(dao, gate, metrics, "test");
         assertThrows(HandlerException.class, () -> handler.handleBatch(batch));
 
-        verify(gate, times(1)).release("opp-1", "d1");
-        verify(gate, times(1)).release("opp-1", "d2");
-        verify(gate, times(1)).release("opp-1", "d3");
+        verify(gate, times(1)).releaseAll("opp-1", List.of("d1", "d2", "d3"));
         assertGaugeReleaseCounter("ok", 3.0);
     }
 
@@ -108,7 +106,7 @@ public class ClaimHandlerTest {
     public void releaseFailureCountsError() {
         when(dao.settleOpportunity("opp-1", batch))
                 .thenReturn(Future.failedFuture(new java.sql.SQLException("boom")));
-        when(gate.release(Mockito.any(), Mockito.any()))
+        when(gate.releaseAll(Mockito.any(), Mockito.any()))
                 .thenReturn(Future.failedFuture(new RuntimeException("redis down")));
 
         ClaimHandler handler = new ClaimHandlerImpl(dao, gate, metrics, "test");
@@ -151,15 +149,10 @@ public class ClaimHandlerTest {
 
         new ClaimHandlerImpl(dao, gate, metrics, "test").handleBatch(batch);
 
-        // COMMITTED: slot stays (driver permanently holds it)
-        verify(gate, times(0)).release("opp-1", "d1");
-        verify(gate, times(0)).reject("opp-1", "d1");
-        // DUPLICATE: Kafka replay, already committed — no gate action
-        verify(gate, times(0)).release("opp-1", "d2");
-        verify(gate, times(0)).reject("opp-1", "d2");
-        // REJECTED: remove from set AND decrement capacity so gate returns FULL
-        verify(gate, times(0)).release("opp-1", "d3");
-        verify(gate, times(1)).reject("opp-1", "d3");
+        // Only the REJECTED driver (d3) is rejected; COMMITTED (d1) keeps its slot and
+        // DUPLICATE (d2, Kafka replay already committed) needs no gate action.
+        verify(gate, times(0)).releaseAll(Mockito.any(), Mockito.any());
+        verify(gate, times(1)).rejectAll("opp-1", List.of("d3"));
         assertGaugeReleaseCounter("ok", 1.0);
     }
 
@@ -207,10 +200,12 @@ public class ClaimHandlerTest {
         // sub1 failed → sub2 is never attempted
         verify(dao, times(1)).settleOpportunity("opp-1", sub1);
         verify(dao, times(0)).settleOpportunity("opp-1", sub2);
-        // all 10 drivers in sub1 get released
+        // all 10 drivers in sub1 get released in one batched call
+        List<String> sub1Drivers = new java.util.ArrayList<>();
         for (int i = 0; i < 10; i++) {
-            verify(gate, times(1)).release("opp-1", "d" + i);
+            sub1Drivers.add("d" + i);
         }
+        verify(gate, times(1)).releaseAll("opp-1", sub1Drivers);
     }
 
     @Test
@@ -223,7 +218,8 @@ public class ClaimHandlerTest {
 
         // Circuit OPEN: PG never touched, Redis claim left intact, no driver notified.
         verify(dao, times(0)).settleOpportunity(Mockito.any(), Mockito.any());
-        verify(gate, times(0)).release(Mockito.any(), Mockito.any());
+        verify(gate, times(0)).releaseAll(Mockito.any(), Mockito.any());
+        verify(gate, times(0)).rejectAll(Mockito.any(), Mockito.any());
         assertCounter("circuit_open", 1.0);
     }
 

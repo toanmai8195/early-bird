@@ -1,6 +1,7 @@
 package com.tm.services.server.dao;
 
 import com.tm.common.metric.Metrics;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import io.vertx.core.Future;
 import io.vertx.core.WorkerExecutor;
@@ -106,8 +107,9 @@ public final class JdbcOpportunityDao implements OpportunityDao {
     }
 
     private void record(Timer.Sample sample, String op, boolean ok) {
-        sample.stop(metrics.timer(LATENCY));
-        metrics.counter(METRIC, ok ? op + "_ok" : op + "_error").increment();
+        // Opportunity CRUD DAO is setup/admin traffic, not a claim scenario: caller = "system".
+        sample.stop(metrics.timer(LATENCY, Tags.of("caller", "system")));
+        metrics.counter(METRIC, Tags.of("result", ok ? op + "_ok" : op + "_error", "caller", "system")).increment();
     }
 
     /** Writes capacity + window_start to opp_meta:{opp} and TTLs the key to window_end. */

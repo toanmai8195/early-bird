@@ -55,6 +55,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -68,16 +69,16 @@ import (
 // ── Flags ────────────────────────────────────────────────────────────────────
 
 var (
-	pgDSN      = flag.String("pg", "postgres://earlybird:earlybird@localhost:5432/earlybird?sslmode=disable", "Postgres DSN")
+	pgDSN       = flag.String("pg", "postgres://earlybird:earlybird@localhost:5432/earlybird?sslmode=disable", "Postgres DSN")
 	metricsAddr = flag.String("metrics-addr", ":9411", "Prometheus /metrics listen address")
 	runMode     = flag.String("run", "throughput", "test mode: throughput|oversell|idempotent|ramp|all")
 
 	// throughput flags
-	contendedOpps    = flag.Int("contended-opps", 20, "opps for contended scenario")
-	contendedPerOpp  = flag.Int("contended-per-opp", 50, "drivers per opp per tick (contended)")
-	diverseOpps      = flag.Int("diverse-opps", 1_000, "opps for diverse scenario")
-	dupPct           = flag.Float64("dup-pct", 5.0, "percent of requests that are dup re-sends (0–100)")
-	capacity         = flag.Int("capacity", 10_000_000, "opportunity capacity (throughput mode)")
+	contendedOpps   = flag.Int("contended-opps", 20, "opps for contended scenario")
+	contendedPerOpp = flag.Int("contended-per-opp", 50, "drivers per opp per tick (contended)")
+	diverseOpps     = flag.Int("diverse-opps", 1_000, "opps for diverse scenario")
+	dupPct          = flag.Float64("dup-pct", 5.0, "percent of requests that are dup re-sends (0–100)")
+	capacity        = flag.Int("capacity", 10_000_000, "opportunity capacity (throughput mode)")
 
 	// oversell flags
 	oversellCapacity = flag.Int("oversell-capacity", 1_000, "capacity for oversell correctness test")
@@ -90,14 +91,12 @@ var (
 	idempotentBatch    = flag.Int("idempotent-batch", 50, "distinct drivers per idempotent round")
 	idempotentRounds   = flag.Int("idempotent-rounds", 5, "times to replay the same batch")
 
-	// ramp flags
-	rampStartRate = flag.Int("ramp-start-rate", 100, "request rate for step 1 (req/s)")
-	rampStepSize  = flag.Int("ramp-step-size", 100, "add this many req/s each step")
-	rampSteps     = flag.Int("ramp-steps", 5, "number of steps per pattern")
-	rampStepDur   = flag.Duration("ramp-step-dur", time.Minute, "how long to hold each rate level")
-	rampCapacity  = flag.Int("ramp-capacity", 10_000_000, "opp capacity per ramp step (large to avoid REJECTED noise)")
-	rampCooldown   = flag.Duration("ramp-cooldown", 15*time.Second, "pause between patterns so Grafana shows a clear gap")
-	rampBatchSize  = flag.Int("ramp-batch-size", 10, "drivers per CTE in contended pattern (mirrors manager bulk-settle)")
+	// ramp flags — nested sweep: for each batch size, run all traffic-rate steps.
+	rampRates      = flag.String("ramp-rates", "10,15,20,50,80,100,120,150", "comma-separated traffic rates (CTE/s) to sweep per batch size")
+	rampStepDur    = flag.Duration("ramp-step-dur", 2*time.Minute, "how long to hold each (batch, rate) step")
+	rampCapacity   = flag.Int("ramp-capacity", 10_000_000, "opp capacity per ramp step (large to avoid REJECTED noise)")
+	rampCooldown   = flag.Duration("ramp-cooldown", 15*time.Second, "pause between batch sizes so Grafana shows a clear gap")
+	rampBatchSizes = flag.String("ramp-batch-sizes", "10,50,100,200,300", "comma-separated batch sizes (drivers/CTE) to sweep; each runs all traffic steps")
 
 	region = flag.String("region", "lt", "region_id")
 	zone   = flag.String("zone", "lt", "zone_id")
@@ -152,7 +151,7 @@ func (h *latHist) max() float64 {
 }
 
 type latReg struct {
-	mu   sync.Mutex
+	mu    sync.Mutex
 	hists map[string]*latHist // scenario → hist
 }
 
@@ -276,12 +275,14 @@ func main() {
 	)
 	lat := newLatReg()
 	cte := newCTEReg()
+	rr := newRampReg()
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		fmt.Fprint(w, reg.Text())
 		fmt.Fprint(w, cte.text())
 		fmt.Fprint(w, lat.text())
+		fmt.Fprint(w, rr.text())
 		fmt.Fprintf(w,
 			"# HELP loadtest_pg_oversell_violations_total PG oversell correctness violations\n"+
 				"# TYPE loadtest_pg_oversell_violations_total counter\n"+
@@ -312,7 +313,7 @@ func main() {
 		ok = runIdempotent(db, reg, cte, lat) && ok
 	}
 	if mode == "ramp" {
-		runRamp(db, reg, cte, lat)
+		runRamp(db, rr)
 	}
 	if mode == "throughput" || mode == "all" {
 		runThroughput(db, reg, cte, lat)
@@ -454,168 +455,247 @@ func runIdempotent(db *sql.DB, reg *lt.Reg, cte *cteReg, lat *latReg) bool {
 	return allOk
 }
 
-// ── Ramp test ─────────────────────────────────────────────────────────────────
+// ── Ramp test (batch × traffic sweep) ─────────────────────────────────────────
 //
-// Runs 4 patterns in sequence.  Each pattern runs --ramp-steps steps; step N
-// sends (startRate + (N-1)*stepSize) req/s for --ramp-step-dur, then moves on.
-// Rate is enforced by a time.Ticker so load arrives as a smooth stream.
+// Nested ramp on a single hot opportunity (1 FOR UPDATE row — the contended case
+// where batch size is the lever). The OUTER loop sweeps batch size (drivers/CTE)
+// through --ramp-batch-sizes (e.g. 10,50,100,200,300); the INNER loop sweeps the
+// traffic rate (CTE/s) through --ramp-rates. Every (batch, rate) pair runs for
+// --ramp-step-dur (default 2m). A fresh opp per step keeps it a hot single row
+// without exhausting capacity over a long run.
 //
-//   contended  — 1 shared opp; every request targets the same FOR UPDATE row
-//   diverse    — rotating opp pool; lock spread across rows
-//   oversell   — 1 opp capacity=startRate/2; ~half COMMITTED rest REJECTED
-//   idempotent — 1 opp; fixed driver pool replayed (dedup cost under rate)
+// Metrics are tagged by `batch` so Grafana shows, as the batch grows: CTE traffic
+// (CTE/s), driver traffic (drivers/s = CTE/s × batch), and per-CTE latency. Two
+// gauges expose the current step (batch size + target rate / "traffic").
 
-func runRamp(db *sql.DB, reg *lt.Reg, cte *cteReg, lat *latReg) {
-	log.Printf("[ramp] start=%d step-size=%d steps=%d dur=%s",
-		*rampStartRate, *rampStepSize, *rampSteps, *rampStepDur)
+// rampReg collects the batch-tagged ramp metrics plus the current-step gauges.
+type rampReg struct {
+	mu       sync.Mutex
+	cte      map[int]*atomic.Int64      // batch -> CTE executions
+	drivers  map[bkResult]*atomic.Int64 // (batch,result) -> driver outcomes
+	lat      map[int]*latHist           // batch -> per-CTE latency
+	curBatch atomic.Int64
+	curRate  atomic.Int64
+}
 
-	// rateStep runs one rate level for stepDur, collecting latency samples.
-	rateStep := func(scenario string, rate int, fn func()) {
-		h := &latHist{}
-		interval := time.Second / time.Duration(rate)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		deadline := time.NewTimer(*rampStepDur)
-		defer deadline.Stop()
-		var wg sync.WaitGroup
-		for {
-			select {
-			case <-deadline.C:
-				// Snapshot before waiting for in-flight goroutines.
-				p50 := time.Duration(h.percentile(0.50) * float64(time.Second))
-				p99 := time.Duration(h.percentile(0.99) * float64(time.Second))
-				mx := time.Duration(h.max() * float64(time.Second))
-				wg.Wait()
-				lat.record(fmt.Sprintf("%s-%d", scenario, rate), p99)
-				fmt.Printf("%-8d %-12s %-12s %-12s\n",
-					rate,
-					p50.Round(time.Millisecond),
-					p99.Round(time.Millisecond),
-					mx.Round(time.Millisecond),
-				)
+type bkResult struct {
+	batch  int
+	result string
+}
+
+func newRampReg() *rampReg {
+	return &rampReg{
+		cte:     map[int]*atomic.Int64{},
+		drivers: map[bkResult]*atomic.Int64{},
+		lat:     map[int]*latHist{},
+	}
+}
+
+// setStep records the current (batch, rate) so the gauges reflect the live step.
+func (r *rampReg) setStep(batch, rate int) {
+	r.curBatch.Store(int64(batch))
+	r.curRate.Store(int64(rate))
+}
+
+func (r *rampReg) incCTE(batch int) {
+	r.mu.Lock()
+	c, ok := r.cte[batch]
+	if !ok {
+		c = &atomic.Int64{}
+		r.cte[batch] = c
+	}
+	r.mu.Unlock()
+	c.Add(1)
+}
+
+func (r *rampReg) incDriver(batch int, result string) {
+	k := bkResult{batch, result}
+	r.mu.Lock()
+	c, ok := r.drivers[k]
+	if !ok {
+		c = &atomic.Int64{}
+		r.drivers[k] = c
+	}
+	r.mu.Unlock()
+	c.Add(1)
+}
+
+func (r *rampReg) recordLat(batch int, d time.Duration) {
+	r.mu.Lock()
+	h, ok := r.lat[batch]
+	if !ok {
+		h = &latHist{}
+		r.lat[batch] = h
+	}
+	r.mu.Unlock()
+	h.record(d)
+}
+
+func (r *rampReg) text() string {
+	r.mu.Lock()
+	cteSnap := make(map[int]int64, len(r.cte))
+	for k, v := range r.cte {
+		cteSnap[k] = v.Load()
+	}
+	drvSnap := make(map[bkResult]int64, len(r.drivers))
+	for k, v := range r.drivers {
+		drvSnap[k] = v.Load()
+	}
+	latKeys := make([]int, 0, len(r.lat))
+	latVals := make(map[int][3]float64, len(r.lat))
+	for k, h := range r.lat {
+		latKeys = append(latKeys, k)
+		latVals[k] = [3]float64{h.percentile(0.50), h.percentile(0.99), h.max()}
+	}
+	r.mu.Unlock()
+	sort.Ints(latKeys)
+
+	var b strings.Builder
+	// Current-step gauges: "traffic" (target CTE/s) and batch size.
+	fmt.Fprintf(&b, "# HELP loadtest_pg_ramp_rate Current ramp target traffic (CTE/s)\n# TYPE loadtest_pg_ramp_rate gauge\nloadtest_pg_ramp_rate %d\n", r.curRate.Load())
+	fmt.Fprintf(&b, "# HELP loadtest_pg_ramp_batch Current ramp batch size (drivers/CTE)\n# TYPE loadtest_pg_ramp_batch gauge\nloadtest_pg_ramp_batch %d\n", r.curBatch.Load())
+	// CTE traffic by batch.
+	fmt.Fprintf(&b, "# HELP loadtest_pg_ramp_cte_total CTE executions by batch size\n# TYPE loadtest_pg_ramp_cte_total counter\n")
+	for batch, v := range cteSnap {
+		fmt.Fprintf(&b, "loadtest_pg_ramp_cte_total{batch=\"%d\"} %d\n", batch, v)
+	}
+	// Driver traffic by batch + outcome.
+	fmt.Fprintf(&b, "# HELP loadtest_pg_ramp_claims_total Driver outcomes by batch size and result\n# TYPE loadtest_pg_ramp_claims_total counter\n")
+	for k, v := range drvSnap {
+		fmt.Fprintf(&b, "loadtest_pg_ramp_claims_total{batch=\"%d\",result=%q} %d\n", k.batch, k.result, v)
+	}
+	// Per-CTE latency by batch.
+	for _, m := range []struct {
+		metric string
+		idx    int
+	}{
+		{"loadtest_pg_ramp_latency_p50_seconds", 0},
+		{"loadtest_pg_ramp_latency_p99_seconds", 1},
+		{"loadtest_pg_ramp_latency_max_seconds", 2},
+	} {
+		fmt.Fprintf(&b, "# HELP %s Per-CTE settle latency by batch size\n# TYPE %s gauge\n", m.metric, m.metric)
+		for _, batch := range latKeys {
+			fmt.Fprintf(&b, "%s{batch=\"%d\"} %g\n", m.metric, batch, latVals[batch][m.idx])
+		}
+	}
+	return b.String()
+}
+
+func runRamp(db *sql.DB, rr *rampReg) {
+	batchSizes := parseIntList("--ramp-batch-sizes", *rampBatchSizes)
+	rates := parseIntList("--ramp-rates", *rampRates)
+	log.Printf("[ramp] batch sweep %v × rates %v, %s/step",
+		batchSizes, rates, *rampStepDur)
+
+	for bi, batch := range batchSizes {
+		fmt.Printf("\n=== batch=%d (%d traffic steps × %s) ===\n", batch, len(rates), *rampStepDur)
+		fmt.Printf("%-8s %-12s %-12s %-12s %-12s\n", "rate/s", "drivers/s", "p50", "p99", "max")
+		for _, rate := range rates {
+			rr.setStep(batch, rate)
+			// Fresh hot opp per step: 1 opp = 1 FOR UPDATE row (contended); large
+			// capacity so a long step never exhausts it (no REJECTED noise).
+			oppID := fmt.Sprintf("lt-ramp-c-b%d-r%d-%d", batch, rate, time.Now().UnixMilli())
+			if err := insertOpp(db, oppID, *rampCapacity); err != nil {
+				log.Printf("[ramp] setup batch=%d rate=%d: %v", batch, rate, err)
 				return
-			case <-ticker.C:
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					t0 := time.Now()
-					fn()
-					h.record(time.Since(t0))
-				}()
 			}
+			rampStep(db, rr, oppID, batch, rate, *rampStepDur)
+		}
+		// Cooldown between batch sizes so Grafana shows a clear gap (skip after last).
+		if bi < len(batchSizes)-1 {
+			log.Printf("[ramp] cooldown %s...", *rampCooldown)
+			time.Sleep(*rampCooldown)
 		}
 	}
-
-	runPattern := func(name string, setup func(rate int) (fn func(), teardown func(), err error)) {
-		fmt.Printf("\n=== pattern: %s (%d steps × %s) ===\n", name, *rampSteps, *rampStepDur)
-		fmt.Printf("%-8s %-12s %-12s %-12s\n", "rate/s", "p50", "p99", "max")
-		for step := 0; step < *rampSteps; step++ {
-			rate := *rampStartRate + step**rampStepSize
-			fn, teardown, err := setup(rate)
-			if err != nil {
-				log.Printf("[ramp/%s] setup step %d: %v", name, step+1, err)
-				return
-			}
-			rateStep(name, rate, fn)
-			if teardown != nil {
-				teardown()
-			}
-		}
-	}
-
-	cooldown := func() {
-		log.Printf("[ramp] cooldown %s...", *rampCooldown)
-		time.Sleep(*rampCooldown)
-	}
-
-	// contended: 1 opp shared by all requests in a step.
-	// contended: 1 opp, each tick settles a batch of drivers in 1 CTE.
-	// rate = CTE/s; each CTE carries ramp-batch-size drivers → actual driver/s = rate×batch.
-	runPattern("contended", func(rate int) (func(), func(), error) {
-		oppID := fmt.Sprintf("lt-ramp-c-%d", time.Now().UnixMilli())
-		if err := insertOpp(db, oppID, *rampCapacity); err != nil {
-			return nil, nil, err
-		}
-		batch := *rampBatchSize
-		return func() {
-			drivers := make([]driverPair, batch)
-			for i := range drivers {
-				id, key := newDriver()
-				drivers[i] = driverPair{id, key}
-			}
-			settleMulti(db, oppID, drivers, reg, cte, "ramp-contended")
-		}, nil, nil
-	})
-	cooldown()
-
-	// diverse: rotating pool of opps; each request picks the next opp in round-robin.
-	runPattern("diverse", func(rate int) (func(), func(), error) {
-		poolSize := min(rate, 200)
-		ts := time.Now().UnixMilli()
-		oppIDs := make([]string, poolSize)
-		for i := range oppIDs {
-			oppIDs[i] = fmt.Sprintf("lt-ramp-d-%d-%d", i, ts)
-			if err := insertOpp(db, oppIDs[i], *rampCapacity); err != nil {
-				return nil, nil, err
-			}
-		}
-		var idx atomic.Int64
-		batch := *rampBatchSize
-		return func() {
-			drivers := make([]driverPair, batch)
-			for j := range drivers {
-				id, key := newDriver()
-				drivers[j] = driverPair{id, key}
-			}
-			i := int(idx.Add(1)-1) % poolSize
-			settleMulti(db, oppIDs[i], drivers, reg, cte, "ramp-diverse")
-		}, nil, nil
-	})
-	cooldown()
-
-	// oversell: 1 opp capacity=rate/2; each tick settles a batch → ~half COMMITTED rest REJECTED.
-	runPattern("oversell", func(rate int) (func(), func(), error) {
-		cap := max(rate/2, 1)
-		oppID := fmt.Sprintf("lt-ramp-o-%d", time.Now().UnixMilli())
-		if err := insertOpp(db, oppID, cap); err != nil {
-			return nil, nil, err
-		}
-		batch := *rampBatchSize
-		return func() {
-			drivers := make([]driverPair, batch)
-			for j := range drivers {
-				id, key := newDriver()
-				drivers[j] = driverPair{id, key}
-			}
-			settleMulti(db, oppID, drivers, reg, cte, "ramp-oversell")
-		}, nil, nil
-	})
-	cooldown()
-
-	// idempotent: fixed driver pool, each tick replays a batch-sized window round-robin.
-	runPattern("idempotent", func(rate int) (func(), func(), error) {
-		poolSize := min(rate**rampBatchSize, *idempotentCapacity)
-		oppID := fmt.Sprintf("lt-ramp-i-%d", time.Now().UnixMilli())
-		if err := insertOpp(db, oppID, *idempotentCapacity); err != nil {
-			return nil, nil, err
-		}
-		pool := make([]driverPair, poolSize)
-		for i := range pool {
-			id, key := newDriver()
-			pool[i] = driverPair{id, key}
-		}
-		// Pre-settle once so subsequent calls hit the duplicate path.
-		settleMulti(db, oppID, pool, reg, cte, "ramp-idempotent")
-		batch := *rampBatchSize
-		var idx atomic.Int64
-		return func() {
-			start := int(idx.Add(int64(batch))-int64(batch)) % poolSize
-			end := min(start+batch, poolSize)
-			settleMulti(db, oppID, pool[start:end], reg, cte, "ramp-idempotent")
-		}, nil, nil
-	})
-
 	log.Printf("[ramp] done")
+}
+
+// rampStep holds one (batch, rate) for dur, dispatching `rate` CTEs/s — each
+// settling `batch` fresh unique drivers on the one hot opp — and recording per-CTE
+// latency (printed at the end, and fed into the batch-tagged registry live).
+func rampStep(db *sql.DB, rr *rampReg, oppID string, batch, rate int, dur time.Duration) {
+	h := &latHist{}
+	interval := time.Second / time.Duration(rate)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	deadline := time.NewTimer(dur)
+	defer deadline.Stop()
+	var wg sync.WaitGroup
+	for {
+		select {
+		case <-deadline.C:
+			p50 := time.Duration(h.percentile(0.50) * float64(time.Second))
+			p99 := time.Duration(h.percentile(0.99) * float64(time.Second))
+			mx := time.Duration(h.max() * float64(time.Second))
+			wg.Wait()
+			fmt.Printf("%-8d %-12d %-12s %-12s %-12s\n", rate, rate*batch,
+				p50.Round(time.Millisecond), p99.Round(time.Millisecond), mx.Round(time.Millisecond))
+			return
+		case <-ticker.C:
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				drivers := make([]driverPair, batch)
+				for i := range drivers {
+					id, key := newDriver()
+					drivers[i] = driverPair{id, key}
+				}
+				t0 := time.Now()
+				settleRamp(db, oppID, drivers, rr, batch)
+				d := time.Since(t0)
+				h.record(d)
+				rr.recordLat(batch, d)
+			}()
+		}
+	}
+}
+
+// settleRamp runs one bulk-settle CTE and records into the ramp registry (CTE count
+// + per-driver outcomes, both tagged by batch). Drivers are freshly generated and
+// unique, so no in-CTE dedup is needed.
+func settleRamp(db *sql.DB, oppID string, drivers []driverPair, rr *rampReg, batch int) {
+	if len(drivers) == 0 {
+		return
+	}
+	rr.incCTE(batch)
+	query, args := buildSettleSQL(oppID, drivers)
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		rr.incDriver(batch, "error")
+		log.Printf("[ramp] settle %s: %v", oppID, err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var driverID, outcome string
+		if err := rows.Scan(&driverID, &outcome); err != nil {
+			rr.incDriver(batch, "error")
+			continue
+		}
+		rr.incDriver(batch, strings.ToLower(outcome))
+	}
+	if err := rows.Err(); err != nil {
+		rr.incDriver(batch, "error")
+	}
+}
+
+func parseIntList(name, s string) []int {
+	var out []int
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil || n <= 0 {
+			log.Fatalf("invalid %s %q: %q is not a positive int", name, s, part)
+		}
+		out = append(out, n)
+	}
+	if len(out) == 0 {
+		log.Fatalf("no values parsed from %s %q", name, s)
+	}
+	return out
 }
 
 // ── Throughput loop ───────────────────────────────────────────────────────────

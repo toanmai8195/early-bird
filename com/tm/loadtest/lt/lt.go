@@ -157,6 +157,10 @@ type Req struct {
 	OppID    string
 	DriverID string
 	IdemKey  string
+	// CallerID rides the X-Caller-Id header → ClaimEvent → manager, so every
+	// server/manager/PG metric for this request is tagged by the scenario that
+	// issued it (e.g. "contended" / "diverse" / "realistic"). Empty = header omitted.
+	CallerID string
 }
 
 // Label maps an HTTP response to a Prometheus result label.
@@ -190,6 +194,9 @@ func SendClaim(client *http.Client, target string, r Req) (int, []byte) {
 	req, _ := http.NewRequest(http.MethodPost, target+"/opportunities/"+r.OppID+"/bookings", nil)
 	req.Header.Set("X-Driver-Id", r.DriverID)
 	req.Header.Set("X-Idempotency-Key", r.IdemKey)
+	if r.CallerID != "" {
+		req.Header.Set("X-Caller-Id", r.CallerID)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil
@@ -244,13 +251,13 @@ func FireAll(client *http.Client, target string, reqs []Req, reg *Reg, scenario 
 //
 // Dup requests reuse the same driverID+idemKey as the original, so the gate
 // returns DUP (200) once the driver is in the claimed_set.
-func BuildReqs(oppID string, uniqueN, dupN int) []Req {
+func BuildReqs(oppID string, uniqueN, dupN int, caller string) []Req {
 	start := newSeq(uniqueN)
 	reqs := make([]Req, 0, uniqueN+dupN)
 
 	for i := 0; i < uniqueN; i++ {
 		id := fmt.Sprintf("d%d", start+int64(i))
-		reqs = append(reqs, Req{OppID: oppID, DriverID: id, IdemKey: id + "k"})
+		reqs = append(reqs, Req{OppID: oppID, DriverID: id, IdemKey: id + "k", CallerID: caller})
 	}
 
 	// Dup targets: first min(dupN, uniqueN) unique requests from this batch.
@@ -261,7 +268,7 @@ func BuildReqs(oppID string, uniqueN, dupN int) []Req {
 	}
 	for i := 0; i < dupN; i++ {
 		orig := reqs[i%poolSize]
-		reqs = append(reqs, Req{OppID: oppID, DriverID: orig.DriverID, IdemKey: orig.IdemKey})
+		reqs = append(reqs, Req{OppID: oppID, DriverID: orig.DriverID, IdemKey: orig.IdemKey, CallerID: caller})
 	}
 	return reqs
 }
@@ -293,7 +300,7 @@ const maxBuf = 500
 
 // NextReqs generates count requests for this opp:
 // floor(count*(1-dupFrac)) unique + remainder dup re-sends of past drivers.
-func (p *OppPool) NextReqs(count int, dupFrac float64) []Req {
+func (p *OppPool) NextReqs(count int, dupFrac float64, caller string) []Req {
 	dupN := int(float64(count)*dupFrac + 0.5)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -309,26 +316,26 @@ func (p *OppPool) NextReqs(count int, dupFrac float64) []Req {
 		id := fmt.Sprintf("d%d", start+int64(i))
 		key := id + "k"
 		p.buf = append(p.buf, sentDriver{id, key})
-		reqs = append(reqs, Req{OppID: p.ID, DriverID: id, IdemKey: key})
+		reqs = append(reqs, Req{OppID: p.ID, DriverID: id, IdemKey: key, CallerID: caller})
 	}
 	if len(p.buf) > maxBuf {
 		p.buf = p.buf[len(p.buf)-maxBuf:]
 	}
 	for i := 0; i < dupN; i++ {
 		d := p.buf[rand.Intn(len(p.buf))]
-		reqs = append(reqs, Req{OppID: p.ID, DriverID: d.id, IdemKey: d.iemKey})
+		reqs = append(reqs, Req{OppID: p.ID, DriverID: d.id, IdemKey: d.iemKey, CallerID: caller})
 	}
 	return reqs
 }
 
 // NextReq generates 1 request: with dupProb probability it re-sends a previously
 // accepted driver (DUP), otherwise a fresh unique driver.
-func (p *OppPool) NextReq(dupProb float64) Req {
+func (p *OppPool) NextReq(dupProb float64, caller string) Req {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.buf) > 0 && rand.Float64() < dupProb {
 		d := p.buf[rand.Intn(len(p.buf))]
-		return Req{OppID: p.ID, DriverID: d.id, IdemKey: d.iemKey}
+		return Req{OppID: p.ID, DriverID: d.id, IdemKey: d.iemKey, CallerID: caller}
 	}
 	n := newSeq(1)
 	id := fmt.Sprintf("d%d", n)
@@ -337,5 +344,5 @@ func (p *OppPool) NextReq(dupProb float64) Req {
 	if len(p.buf) > maxBuf {
 		p.buf = p.buf[1:]
 	}
-	return Req{OppID: p.ID, DriverID: id, IdemKey: key}
+	return Req{OppID: p.ID, DriverID: id, IdemKey: key, CallerID: caller}
 }

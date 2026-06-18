@@ -1,6 +1,7 @@
 package com.tm.services.server.di;
 
 import com.tm.common.kafka.KafkaClients;
+import com.tm.common.pg.PgPool;
 import com.tm.services.server.config.ServerConfig;
 import dagger.Module;
 import dagger.Provides;
@@ -15,7 +16,6 @@ import io.vertx.kafka.client.producer.KafkaProducer;
 import io.vertx.redis.client.Redis;
 import io.vertx.redis.client.RedisAPI;
 import io.vertx.redis.client.RedisOptions;
-import org.postgresql.ds.PGSimpleDataSource;
 
 import java.time.Duration;
 import javax.inject.Singleton;
@@ -72,11 +72,11 @@ public final class ServerModule {
     @Provides
     @Singleton
     static DataSource dataSource(ServerConfig config) {
-        PGSimpleDataSource ds = new PGSimpleDataSource();
-        ds.setUrl(config.jdbcUrl());
-        ds.setUser(config.jdbcUser());
-        ds.setPassword(config.jdbcPassword());
-        return ds;
+        // Pooled (HikariCP) like the manager: opportunity CRUD borrows/returns warm
+        // connections instead of opening a fresh socket per query. Sized to the
+        // "pg-opportunity" worker pool so every worker has a connection ready.
+        return PgPool.dataSource(config.jdbcUrl(), config.jdbcUser(), config.jdbcPassword(),
+                config.dbPoolSize(), "pg-opportunity");
     }
 
     /** Worker pool for blocking JDBC ops in opportunity CRUD (off the event loop). */

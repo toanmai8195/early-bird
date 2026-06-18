@@ -3,6 +3,7 @@ package com.tm.services.server.redis;
 import com.tm.common.metric.Metrics;
 import com.tm.services.server.dao.Opportunity;
 import com.tm.services.server.dao.ReconciliationDao;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import io.vertx.core.Future;
 import io.vertx.redis.client.RedisAPI;
@@ -50,8 +51,10 @@ public final class RedisWarmupServiceImpl implements RedisWarmupService {
                         ? Future.succeededFuture("skipped")
                         : restoreAll().map(v -> "restored"))
                 .andThen(ar -> {
-                    sample.stop(metrics.timer(LATENCY));
-                    metrics.counter(METRIC, ar.succeeded() ? ar.result() : "error").increment();
+                    // Internal self-heal timer, no request: caller = "system".
+                    sample.stop(metrics.timer(LATENCY, Tags.of("caller", "system")));
+                    metrics.counter(METRIC, Tags.of(
+                            "result", ar.succeeded() ? ar.result() : "error", "caller", "system")).increment();
                 })
                 .mapEmpty();
     }

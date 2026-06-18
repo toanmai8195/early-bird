@@ -1,6 +1,7 @@
 package com.tm.services.server.dao;
 
 import com.tm.common.metric.Metrics;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import io.vertx.core.Future;
 import io.vertx.core.WorkerExecutor;
@@ -65,8 +66,9 @@ public final class JdbcReconciliationDao implements ReconciliationDao {
     }
 
     private void record(Timer.Sample sample, String op, boolean ok) {
-        sample.stop(metrics.timer(LATENCY));
-        metrics.counter(METRIC, ok ? op + "_ok" : op + "_error").increment();
+        // Reconciliation runs from the internal warmup timer, no request: caller = "system".
+        sample.stop(metrics.timer(LATENCY, Tags.of("caller", "system")));
+        metrics.counter(METRIC, Tags.of("result", ok ? op + "_ok" : op + "_error", "caller", "system")).increment();
     }
 
     private List<Opportunity> listOpen() throws SQLException {

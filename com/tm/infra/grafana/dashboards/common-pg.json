@@ -14,16 +14,29 @@
         "type": "datasource",
         "query": "prometheus",
         "current": {}
+      },
+      {
+        "name": "caller",
+        "type": "query",
+        "label": "caller",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": { "query": "label_values(caller)", "refId": "caller" },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2,
+        "sort": 1
       }
     ]
   },
   "panels": [
     {
       "id": 1,
-      "title": "PG settle rate per driver (booking.pg.settle)",
+      "title": "PG settle rate — DRIVERS/s (booking.pg.settle)",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Counter booking_pg_settle_total — đếm THEO TÀI XẾ (mỗi claim/event một lần, kể cả duplicate trong cùng batch), tách theo result (committed/duplicate/rejected/error). Đây là throughput claim thực sự được settle ở tầng SQL.",
+      "description": "Counter booking_pg_settle_total — DRIVER traffic: one increment per claim/event (incl. intra-batch duplicates), split by result (committed/duplicate/rejected/error) and caller (scenario). This is the real settled-claims throughput. Compare with the per-CTE panel: drivers/s ÷ CTE/s = effective sub-batch size.",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
       "fieldConfig": {
         "defaults": { "unit": "ops" },
@@ -37,17 +50,17 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_pg_settle_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_pg_settle_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
     {
       "id": 3,
-      "title": "PG settle rate per batch (booking.pg.settle.batch)",
+      "title": "PG settle rate — CTE/s (booking.pg.settle.batch)",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Counter booking_pg_settle_batch_total — đếm THEO BATCH (mỗi lần settleOpportunity() = một sub-batch ≤10 claim = một SQL round-trip), tách theo ok/error. So với panel per-driver: tỉ lệ driver/batch ≈ batch size hiệu dụng.",
+      "description": "Counter booking_pg_settle_batch_total — CTE traffic: one increment per settleOpportunity() call = one bulk CTE = one SQL round-trip, split by ok/error and caller (scenario). drivers/s (per-driver panel) ÷ CTE/s (this panel) = effective sub-batch size.",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
       "fieldConfig": {
         "defaults": { "unit": "ops" },
@@ -59,24 +72,24 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_pg_settle_batch_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_pg_settle_batch_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
     {
       "id": 2,
-      "title": "PG settle latency P99 per batch (booking.pg.settle.latency)",
+      "title": "PG settle latency P99 — per CTE (booking.pg.settle.latency)",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Timer booking_pg_settle_latency_seconds, percentile P99 — đo THEO BATCH (một lần record cho mỗi settleOpportunity() call), thời gian thuần thực thi CTE trong PG (không gồm chờ worker thread hay connection). Ngưỡng tham chiếu: <50ms OK, >200ms cần điều tra.",
+      "description": "Timer booking_pg_settle_latency_seconds, P99 — measured PER CTE (one sample per settleOpportunity() call), not per driver: pure CTE execution time in PG, split by caller (scenario). Reference: <50ms OK, >200ms investigate.",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_pg_settle_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "P99 / batch"
+          "expr": "booking_pg_settle_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} P99 / CTE"
         }
       ]
     }

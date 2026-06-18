@@ -273,7 +273,9 @@ func runRamp(client *http.Client, reg *lt.Reg, lats *latReg) {
 		ceiling := 0
 		for _, target := range rampLevels {
 			scenario := fmt.Sprintf("ramp_%s_%d", name, target)
-			res := rampStep(client, *serverURL, getOppID, target, *rampStepDur, reg, scenario)
+			// caller = pattern name (contended/diverse) so PG/manager metrics can be
+			// sliced by the same pattern measured here on the API side.
+			res := rampStep(client, *serverURL, getOppID, target, *rampStepDur, reg, scenario, name)
 			lats.set(scenario, res.p50, res.p99, res.max)
 
 			errPct := 0.0
@@ -351,7 +353,7 @@ func runRamp(client *http.Client, reg *lt.Reg, lats *latReg) {
 		}
 		scenario := fmt.Sprintf("ramp_realistic_%d", target)
 		res := rampStep(client, *serverURL, func(_ int) string { return oppID },
-			target, *rampStepDur, reg, scenario)
+			target, *rampStepDur, reg, scenario, "realistic")
 		lats.set(scenario, res.p50, res.p99, res.max)
 
 		errPct := 0.0
@@ -392,7 +394,7 @@ type stepResult struct {
 }
 
 func rampStep(client *http.Client, target string, getOppID func(int) string,
-	rps int, dur time.Duration, reg *lt.Reg, scenario string) stepResult {
+	rps int, dur time.Duration, reg *lt.Reg, scenario, caller string) stepResult {
 
 	const batchMs = 10
 	batchSize := rps * batchMs / 1000
@@ -434,7 +436,7 @@ func rampStep(client *http.Client, target string, getOppID func(int) string,
 		<-ticker.C
 		for j := 0; j < batchSize; j++ {
 			id, key := lt.NewDriver()
-			work <- lt.Req{OppID: getOppID(i), DriverID: id, IdemKey: key}
+			work <- lt.Req{OppID: getOppID(i), DriverID: id, IdemKey: key, CallerID: caller}
 			sent++
 			i++
 		}
@@ -473,7 +475,7 @@ func runGate(client *http.Client, reg *lt.Reg) bool {
 	wID := fmt.Sprintf("lt-gate-warmup-%d", now0.UnixMilli())
 	if err := lt.CreateOpp(client, *serverURL, wID, *region, *zone,
 		*capacity, now0.Add(-time.Second).Unix(), now0.Add(time.Hour).Unix()); err == nil {
-		fireHTTP(client, *serverURL, lt.BuildReqs(wID, *capacity, 0),
+		fireHTTP(client, *serverURL, lt.BuildReqs(wID, *capacity, 0, "gate_warmup"),
 			*gateRPS, &tally{}, &latHist{}, reg, "gate_warmup")
 	}
 	// Sleep > waitDurationInOpenState (5s) so the CB is out of OPEN state before
@@ -552,14 +554,14 @@ func gateRound(client *http.Client, reg *lt.Reg, round int) bool {
 	restN := *gateReqs - seedN - dupN
 
 	// seed: unique drivers → all should be ACCEPTED
-	seedReqs := lt.BuildReqs(oppID, seedN, 0)
+	seedReqs := lt.BuildReqs(oppID, seedN, 0, "gate")
 	// dup: re-fire seed drivers → all should be DUP (opp not full yet, SISMEMBER runs)
 	dupReqs := make([]lt.Req, dupN)
 	for i := range dupReqs {
 		dupReqs[i] = seedReqs[i%seedN]
 	}
 	// rest: new unique drivers → (cap-seedN) ACCEPTED, remainder FULL
-	restReqs := lt.BuildReqs(oppID, restN, 0)
+	restReqs := lt.BuildReqs(oppID, restN, 0, "gate")
 
 	scenario := fmt.Sprintf("gate_r%d", round)
 	// Use separate tallies per phase so we can compute effectiveSeedN: the number of
@@ -657,7 +659,7 @@ func runIdempotent(client *http.Client, reg *lt.Reg) bool {
 	}
 
 	// Round 0: unique batch → all should be ACCEPTED (202)
-	batch := lt.BuildReqs(oppID, batchSize, 0)
+	batch := lt.BuildReqs(oppID, batchSize, 0, "idempotent")
 
 	var tal0 tally
 	fireHTTP(client, *serverURL, batch, *gateRPS, &tal0, &latHist{}, reg, "idempotent_r0")
@@ -732,7 +734,7 @@ func tickContended(client *http.Client, opps []*lt.OppPool, perOpp int, dupFrac 
 		o := o
 		go func() {
 			defer wg.Done()
-			reqs := o.NextReqs(perOpp, dupFrac)
+			reqs := o.NextReqs(perOpp, dupFrac, "contended")
 			var h latHist
 			fireHTTP(client, *serverURL, reqs, 0, &tally{}, &h, reg, "contended")
 			if p50, p99, _, max := h.stats(); p99 > 0 {
@@ -750,7 +752,7 @@ func tickDiverse(client *http.Client, opps []*lt.OppPool, dupFrac float64, reg *
 		o := o
 		go func() {
 			defer wg.Done()
-			r := o.NextReq(dupFrac)
+			r := o.NextReq(dupFrac, "diverse")
 			t := time.Now()
 			status, body := lt.SendClaim(client, *serverURL, r)
 			elapsed := time.Since(t)
