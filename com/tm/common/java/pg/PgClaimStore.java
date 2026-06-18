@@ -2,6 +2,7 @@ package com.tm.common.pg;
 
 import com.tm.common.kafka.ClaimEvent;
 import com.tm.common.metric.Metrics;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 
 import java.sql.Connection;
@@ -13,6 +14,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
@@ -34,14 +36,25 @@ import javax.inject.Singleton;
 @Singleton
 public final class PgClaimStore implements ClaimStore {
 
-    // Per-driver outcome counter (one increment per claim, incl. intra-batch dups).
+    // DRIVER traffic: one increment per claim (incl. intra-batch dups), tagged by
+    // outcome. rate(booking_pg_settle_total) = drivers/s settled.
     private static final String METRIC = "booking.pg.settle";
-    // Per-batch counter: one increment per settleOpportunity() call (one sub-batch /
-    // one SQL round-trip), tagged ok/error. Pairs with LATENCY (also per-batch).
+    // CTE traffic: one increment per settleOpportunity() call = one bulk CTE / one SQL
+    // round-trip, tagged ok/error. rate(booking_pg_settle_batch_total) = CTE/s.
+    // drivers/s ÷ CTE/s = avg drivers per CTE (effective sub-batch size).
     private static final String BATCH_METRIC = "booking.pg.settle.batch";
+    // Latency is measured PER CTE (one Timer sample per settleOpportunity call), not
+    // per driver — pairs with BATCH_METRIC.
     private static final String LATENCY = "booking.pg.settle.latency";
 
     private final Metrics metrics;
+
+    // SQL text is identical for a given driver count, so cache it per size instead of
+    // rebuilding the CTE string on every settle. Full sub-batches share one entry, so
+    // the JDBC driver's server-side statement cache (keyed by SQL text per connection)
+    // also stays warm and Postgres reuses the plan. Bounded by the distinct sub-batch
+    // sizes seen (≈ settleBatchSize + partial tails).
+    private final ConcurrentHashMap<Integer, String> sqlBySize = new ConcurrentHashMap<>();
 
     @Inject
     public PgClaimStore(Metrics metrics) {
@@ -52,6 +65,8 @@ public final class PgClaimStore implements ClaimStore {
     public List<Outcome> settleOpportunity(Connection conn, String opportunityId, List<ClaimEvent> events)
             throws SQLException {
         Timer.Sample sample = Timer.start();
+        // All events of one sub-batch share an opportunity, hence one caller (scenario).
+        String caller = events.isEmpty() ? ClaimEvent.UNKNOWN_CALLER : events.get(0).callerId();
         // Dedup driver (preserve arrival order), keeping the first idempotency key.
         LinkedHashMap<String, String> driverIdem = new LinkedHashMap<>();
         for (ClaimEvent e : events) {
@@ -59,7 +74,8 @@ public final class PgClaimStore implements ClaimStore {
         }
 
         Map<String, Outcome> byDriver = new HashMap<>();
-        try (PreparedStatement ps = conn.prepareStatement(buildSql(driverIdem.size()))) {
+        String sql = sqlBySize.computeIfAbsent(driverIdem.size(), PgClaimStore::buildSql);
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             int p = 1;
             for (Map.Entry<String, String> en : driverIdem.entrySet()) {
                 ps.setString(p++, en.getKey());    // driver_id
@@ -75,19 +91,19 @@ public final class PgClaimStore implements ClaimStore {
                 }
             }
         } catch (SQLException e) {
-            sample.stop(metrics.timer(LATENCY));
-            metrics.counter(METRIC, "error").increment();
-            metrics.counter(BATCH_METRIC, "error").increment();
+            sample.stop(metrics.timer(LATENCY, Tags.of("caller", caller)));
+            metrics.counter(METRIC, Tags.of("result", "error", "caller", caller)).increment();
+            metrics.counter(BATCH_METRIC, Tags.of("result", "error", "caller", caller)).increment();
             throw e;
         }
-        sample.stop(metrics.timer(LATENCY));
-        metrics.counter(BATCH_METRIC, "ok").increment();
+        sample.stop(metrics.timer(LATENCY, Tags.of("caller", caller)));
+        metrics.counter(BATCH_METRIC, Tags.of("result", "ok", "caller", caller)).increment();
 
         // Map each event (incl. intra-batch duplicates) to its driver's outcome.
         List<Outcome> result = new ArrayList<>(events.size());
         for (ClaimEvent e : events) {
             Outcome o = byDriver.get(e.driverId());
-            metrics.counter(METRIC, o.name().toLowerCase()).increment();
+            metrics.counter(METRIC, Tags.of("result", o.name().toLowerCase(), "caller", caller)).increment();
             result.add(o);
         }
         return result;

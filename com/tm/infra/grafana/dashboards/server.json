@@ -9,7 +9,20 @@
   "time": { "from": "now-1h", "to": "now" },
   "templating": {
     "list": [
-      { "name": "datasource", "type": "datasource", "query": "prometheus", "current": {} }
+      { "name": "datasource", "type": "datasource", "query": "prometheus", "current": {} },
+      {
+        "name": "caller",
+        "type": "query",
+        "label": "caller",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": { "query": "label_values(caller)", "refId": "caller" },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2,
+        "sort": 1
+      }
     ]
   },
   "panels": [
@@ -24,8 +37,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_api_claim_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_api_claim_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -40,8 +53,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_api_claim_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "p99"
+          "expr": "booking_api_claim_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} p99"
         }
       ]
     },
@@ -56,8 +69,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_api_opportunity_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_api_opportunity_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -72,8 +85,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_api_opportunity_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "p99"
+          "expr": "booking_api_opportunity_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} p99"
         }
       ]
     },
@@ -88,8 +101,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_dao_opportunity_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_dao_opportunity_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -104,8 +117,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_dao_opportunity_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "p99"
+          "expr": "booking_dao_opportunity_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} p99"
         }
       ]
     },
@@ -120,8 +133,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_dao_reconciliation_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_dao_reconciliation_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -136,8 +149,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_dao_reconciliation_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "p99"
+          "expr": "booking_dao_reconciliation_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} p99"
         }
       ]
     },
@@ -152,8 +165,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_redis_warmup_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_redis_warmup_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -168,8 +181,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_redis_warmup_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "p99"
+          "expr": "booking_redis_warmup_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} p99"
         }
       ]
     }

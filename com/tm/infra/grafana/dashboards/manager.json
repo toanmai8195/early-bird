@@ -14,6 +14,19 @@
         "type": "datasource",
         "query": "prometheus",
         "current": {}
+      },
+      {
+        "name": "caller",
+        "type": "query",
+        "label": "caller",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": { "query": "label_values(caller)", "refId": "caller" },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2,
+        "sort": 1
       }
     ]
   },
@@ -23,14 +36,14 @@
       "title": "DAO commit rate (booking.dao.commit)",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Counter booking_dao_commit_total, tách theo result (committed/duplicate/rejected).",
+      "description": "Counter booking_dao_commit_total — DRIVERS/s (one increment per driver outcome), split by result (committed/duplicate/rejected) and caller. Note the paired latency panel is per CTE, not per driver.",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_dao_commit_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_dao_commit_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -45,8 +58,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_dao_commit_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "p99"
+          "expr": "booking_dao_commit_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} p99"
         }
       ]
     },
@@ -61,8 +74,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_consumer_handle_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_consumer_handle_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -77,8 +90,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_consumer_gate_release_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_consumer_gate_release_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -93,8 +106,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_consumer_notify_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_consumer_notify_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -109,8 +122,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_dao_ping_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_dao_ping_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -125,8 +138,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_dao_ping_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "p99"
+          "expr": "booking_dao_ping_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} p99"
         }
       ]
     }

@@ -12,7 +12,7 @@ RAMP_STEP       ?= 2m
 RAMP_COOLDOWN   ?= 15s
 
 .PHONY: infra-up infra-down infra-logs server manager \
-        loadtest-redis loadtest-pg \
+        loadtest-redis loadtest-pg loadtest-pg-run \
         loadtest-server-build loadtest-server-gate loadtest-server-ramp \
         loadtest-server-idempotent loadtest-server-throughput loadtest-server \
         down
@@ -47,7 +47,24 @@ loadtest-redis:
 	$(COMPOSE) --profile loadtest up --no-deps --exit-code-from loadtest-redis-counter loadtest-redis-counter
 
 # Build the pg load-test image, load into Docker, run it once.
+# Prerequisite: Postgres already up (e.g. via infra-up or loadtest-pg-run).
 loadtest-pg:
+	bazel run //com/tm/loadtest/pg:pg_load
+	$(COMPOSE) --profile loadtest up --no-deps --exit-code-from loadtest-pg loadtest-pg
+
+# One-shot: bring up only the infra the PG load test needs — Postgres (the DB under
+# test; schema auto-loaded from migrations/ on first init), Prometheus + Grafana to
+# view the batch×traffic sweep — then build + run the test. No Redis/Kafka needed.
+# Watch live at http://localhost:3000 (dashboard "Loadtest — PG Claim Store").
+loadtest-pg-run:
+	$(COMPOSE) up -d postgres prometheus grafana
+	@curl -sf -X POST http://localhost:9090/-/reload > /dev/null 2>&1 && echo "Prometheus config reloaded." || true
+	@echo "Waiting for Postgres..."; \
+	for i in $$(seq 1 30); do \
+	  $(COMPOSE) exec -T postgres pg_isready -U earlybird -d earlybird > /dev/null 2>&1 && echo "Postgres ready." && break; \
+	  [ $$i -eq 30 ] && echo "Postgres not ready in time" && exit 1; \
+	  echo "  $$i/30..."; sleep 2; \
+	done
 	bazel run //com/tm/loadtest/pg:pg_load
 	$(COMPOSE) --profile loadtest up --no-deps --exit-code-from loadtest-pg loadtest-pg
 

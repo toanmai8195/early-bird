@@ -13,6 +13,7 @@ import com.tm.services.server.dao.Opportunity;
 import com.tm.services.server.dao.OpportunityDao;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.vertx.core.Future;
+import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.RequestBody;
@@ -47,6 +48,9 @@ public class OpportunityHandlerImplTest {
         ctx = mock(RoutingContext.class);
         body = mock(RequestBody.class);
         response = mock(HttpServerResponse.class);
+        HttpServerRequest request = mock(HttpServerRequest.class);
+        when(ctx.request()).thenReturn(request);
+        when(request.getHeader("X-Caller-Id")).thenReturn(null); // no caller → "system"
         when(ctx.pathParam("id")).thenReturn("opp-1");
         when(ctx.body()).thenReturn(body);
         when(body.asJsonObject()).thenReturn(OPP.toJson());

@@ -3,6 +3,7 @@ package com.tm.services.manager.dao;
 import com.tm.common.kafka.ClaimEvent;
 import com.tm.common.metric.Metrics;
 import com.tm.common.pg.ClaimStore;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import io.vertx.core.Future;
 import io.vertx.core.WorkerExecutor;
@@ -48,6 +49,8 @@ public final class JdbcBookingDao implements BookingDao {
     @Override
     public Future<List<ClaimStore.Outcome>> settleOpportunity(String opportunityId, List<ClaimEvent> events) {
         Timer.Sample sample = Timer.start();
+        // All events of a sub-batch share an opportunity, hence one caller (scenario).
+        String caller = events.isEmpty() ? ClaimEvent.UNKNOWN_CALLER : events.get(0).callerId();
         return workerExecutor.executeBlocking(() -> {
             try (Connection conn = dataSource.getConnection()) {
                 // One statement per connection -> autocommit (default) is fine,
@@ -55,13 +58,15 @@ public final class JdbcBookingDao implements BookingDao {
                 return claimStore.settleOpportunity(conn, opportunityId, events);
             }
         }, false).onComplete(ar -> {
-            sample.stop(metrics.timer(LATENCY));
+            // Latency is per settle call (one CTE / one sub-batch), tagged by caller.
+            sample.stop(metrics.timer(LATENCY, Tags.of("caller", caller)));
             if (ar.succeeded()) {
+                // One increment per driver outcome → booking.dao.commit = drivers/s.
                 for (ClaimStore.Outcome o : ar.result()) {
-                    metrics.counter(METRIC, o.name().toLowerCase()).increment();
+                    metrics.counter(METRIC, Tags.of("result", o.name().toLowerCase(), "caller", caller)).increment();
                 }
             } else {
-                metrics.counter(METRIC, "error").increment();
+                metrics.counter(METRIC, Tags.of("result", "error", "caller", caller)).increment();
             }
         });
     }
@@ -76,8 +81,10 @@ public final class JdbcBookingDao implements BookingDao {
                 return null;
             }
         }, false).onComplete(ar -> {
-            sample.stop(metrics.timer(PING_LATENCY));
-            metrics.counter(PING_METRIC, ar.succeeded() ? "ok" : "error").increment();
+            // Internal liveness probe, no request: caller = "system".
+            sample.stop(metrics.timer(PING_LATENCY, Tags.of("caller", "system")));
+            metrics.counter(PING_METRIC, Tags.of(
+                    "result", ar.succeeded() ? "ok" : "error", "caller", "system")).increment();
         });
     }
 }

@@ -2,6 +2,7 @@ package com.tm.common.metric;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 
 import javax.inject.Inject;
@@ -20,21 +21,21 @@ public final class MicrometerMetrics implements Metrics {
 
     @Override
     public Counter counter(String name, String result) {
-        return Counter.builder(name).tag("result", result).register(registry);
+        return counter(name, Tags.of("result", result));
     }
 
     @Override
-    public Counter counter(String name, String result, String instanceId) {
-        return Counter.builder(name).tag("result", result).tag("instance", instanceId).register(registry);
+    public Counter counter(String name, Tags tags) {
+        return Counter.builder(name).tags(tags).register(registry);
     }
 
     @Override
     public Timer timer(String name) {
-        return Timer.builder(name).publishPercentiles(0.99).register(registry);
+        return timer(name, Tags.empty());
     }
 
     @Override
-    public Timer timer(String name, String result) {
-        return Timer.builder(name).tag("result", result).publishPercentiles(0.99).register(registry);
+    public Timer timer(String name, Tags tags) {
+        return Timer.builder(name).tags(tags).publishPercentiles(0.99).register(registry);
     }
 }

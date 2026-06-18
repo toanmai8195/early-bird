@@ -6,6 +6,7 @@ import com.tm.common.metric.Metrics;
 import com.tm.common.redis.ClaimGate;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import io.vertx.core.Future;
 import io.vertx.ext.web.RoutingContext;
@@ -61,12 +62,15 @@ public final class ClaimHandlerImpl implements ClaimHandler {
         String opportunityId = ctx.pathParam("id");
         String driverId = ctx.request().getHeader("X-Driver-Id");
         String idempotencyKey = ctx.request().getHeader("X-Idempotency-Key");
+        // Caller (e.g. load-test scenario) rides every metric here and the ClaimEvent
+        // so the manager/PG side can be sliced by the same caller. Missing → "unknown".
+        String callerId = header(ctx, "X-Caller-Id");
 
         if (opportunityId == null || opportunityId.isBlank()
                 || driverId == null || driverId.isBlank()
                 || idempotencyKey == null || idempotencyKey.isBlank()) {
-            metrics.counter(METRIC, "bad_request").increment();
-            sample.stop(metrics.timer(LATENCY));
+            metrics.counter(METRIC, Tags.of("result", "bad_request", "caller", callerId)).increment();
+            sample.stop(metrics.timer(LATENCY, Tags.of("result", "bad_request", "caller", callerId)));
             ctx.response()
                     .setStatusCode(400)
                     .putHeader("content-type", "application/json")
@@ -76,7 +80,7 @@ public final class ClaimHandlerImpl implements ClaimHandler {
 
         claimViaGate(opportunityId, driverId)
                 .compose(outcome -> switch (outcome) {
-                    case OK -> producer.publish(ClaimEvent.now(opportunityId, driverId, idempotencyKey))
+                    case OK -> producer.publish(ClaimEvent.now(opportunityId, driverId, idempotencyKey, callerId))
                             .map(v -> new Reply(202, "ACCEPTED", "ok"))
                             .recover(err -> {
                                 System.err.printf("publish failed opp=%s driver=%s: %s: %s%n",
@@ -98,8 +102,8 @@ public final class ClaimHandlerImpl implements ClaimHandler {
                                 ar.cause().getClass().getSimpleName(), ar.cause().getMessage());
                     }
                     Reply reply = ar.succeeded() ? ar.result() : new Reply(503, "UNAVAILABLE", "error");
-                    metrics.counter(METRIC, reply.metric()).increment();
-                    sample.stop(metrics.timer(LATENCY, reply.metric()));
+                    metrics.counter(METRIC, Tags.of("result", reply.metric(), "caller", callerId)).increment();
+                    sample.stop(metrics.timer(LATENCY, Tags.of("result", reply.metric(), "caller", callerId)));
                     ctx.response()
                             .setStatusCode(reply.status())
                             .putHeader("content-type", "application/json")
@@ -134,6 +138,12 @@ public final class ClaimHandlerImpl implements ClaimHandler {
 
     private Future<Outcome> degraded() {
         return Future.succeededFuture(Outcome.THROTTLED);
+    }
+
+    /** Header value, or {@link ClaimEvent#UNKNOWN_CALLER} when missing/blank. */
+    private static String header(RoutingContext ctx, String name) {
+        String v = ctx.request().getHeader(name);
+        return v == null || v.isBlank() ? ClaimEvent.UNKNOWN_CALLER : v;
     }
 
     private enum Outcome {

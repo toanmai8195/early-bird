@@ -18,7 +18,7 @@ public class ClaimGateTest {
         RedisAPI redis = Mockito.mock(RedisAPI.class);
         Response resp = Mockito.mock(Response.class);
         when(resp.toString()).thenReturn(scriptResult);
-        when(redis.eval(any())).thenReturn(Future.succeededFuture(resp));
+        when(redis.evalsha(any())).thenReturn(Future.succeededFuture(resp));
         return redis;
     }
 
@@ -53,38 +53,77 @@ public class ClaimGateTest {
     }
 
     @Test
-    public void rejectRemovesDriverAndDecrementsCapacity() {
+    public void releaseAllRemovesAllDriversInOneSrem() {
+        RedisAPI redis = Mockito.mock(RedisAPI.class);
+        when(redis.srem(any())).thenReturn(Future.succeededFuture(Mockito.mock(Response.class)));
+
+        new VertxClaimGate(redis).releaseAll("opp-42", List.of("d1", "d2", "d3")).result();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> args = ArgumentCaptor.forClass(List.class);
+        Mockito.verify(redis, Mockito.times(1)).srem(args.capture());
+        assertEquals(List.of("claimed_set:opp-42", "d1", "d2", "d3"), args.getValue());
+    }
+
+    @Test
+    public void releaseAllEmptyIsNoOp() {
+        RedisAPI redis = Mockito.mock(RedisAPI.class);
+        new VertxClaimGate(redis).releaseAll("opp-42", List.of()).result();
+        Mockito.verify(redis, Mockito.never()).srem(any());
+    }
+
+    @Test
+    public void rejectAllRemovesDriversAndDecrementsCapacityByCount() {
         RedisAPI redis = Mockito.mock(RedisAPI.class);
         when(redis.srem(any())).thenReturn(Future.succeededFuture(Mockito.mock(Response.class)));
         when(redis.hincrby(Mockito.anyString(), Mockito.anyString(), Mockito.anyString()))
                 .thenReturn(Future.succeededFuture(Mockito.mock(Response.class)));
 
-        new VertxClaimGate(redis).reject("opp-42", "driver-7").result();
+        new VertxClaimGate(redis).rejectAll("opp-42", List.of("d1", "d2", "d3")).result();
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> sremArgs = ArgumentCaptor.forClass(List.class);
-        Mockito.verify(redis).srem(sremArgs.capture());
-        assertEquals("claimed_set:opp-42", sremArgs.getValue().get(0));
-        assertEquals("driver-7", sremArgs.getValue().get(1));
-
-        Mockito.verify(redis).hincrby("opp_meta:opp-42", "capacity", "-1");
+        Mockito.verify(redis, Mockito.times(1)).srem(sremArgs.capture());
+        assertEquals(List.of("claimed_set:opp-42", "d1", "d2", "d3"), sremArgs.getValue());
+        // Capacity decremented once, by the number of rejected drivers.
+        Mockito.verify(redis).hincrby("opp_meta:opp-42", "capacity", "-3");
     }
 
     @Test
-    public void evalUsesPerOpportunityClaimedSetAndMetaKeys() {
+    public void claimUsesEvalshaWithPerOpportunityKeys() {
         RedisAPI redis = redisReturning("OK");
         new VertxClaimGate(redis).claim("opp-42", "driver-7").result();
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> args = ArgumentCaptor.forClass(List.class);
-        Mockito.verify(redis).eval(args.capture());
+        Mockito.verify(redis).evalsha(args.capture());
 
         List<String> a = args.getValue();
-        // [script, numkeys, claimed_set key, opp_meta key, pg_health key, driver_id]
+        // [sha, numkeys, claimed_set key, opp_meta key, pg_health key, driver_id]
+        assertEquals(40, a.get(0).length()); // SHA1 hex
         assertEquals("3", a.get(1));
         assertEquals("claimed_set:opp-42", a.get(2));
         assertEquals("opp_meta:opp-42", a.get(3));
         assertEquals(PgHealth.KEY, a.get(4));
         assertEquals("driver-7", a.get(5));
+    }
+
+    @Test
+    public void claimFallsBackToEvalOnNoScript() {
+        RedisAPI redis = Mockito.mock(RedisAPI.class);
+        when(redis.evalsha(any()))
+                .thenReturn(Future.failedFuture(new RuntimeException("NOSCRIPT No matching script")));
+        Response resp = Mockito.mock(Response.class);
+        when(resp.toString()).thenReturn("OK");
+        when(redis.eval(any())).thenReturn(Future.succeededFuture(resp));
+
+        assertEquals(ClaimGate.Result.OK,
+                new VertxClaimGate(redis).claim("opp-42", "driver-7").result());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> args = ArgumentCaptor.forClass(List.class);
+        Mockito.verify(redis).eval(args.capture());
+        // EVAL is sent the full script body (not the SHA) so Redis re-caches it.
+        org.junit.Assert.assertTrue(args.getValue().get(0).contains("redis.call"));
     }
 }

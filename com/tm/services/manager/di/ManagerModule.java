@@ -122,10 +122,14 @@ public final class ManagerModule {
     @Provides
     @Singleton
     static RedisAPI redisApi(Vertx vertx, ManagerConfig config) {
+        // A full/hot opp settles into a burst of rejectAll/releaseAll (gate cleanup);
+        // 4 connections throttle that burst even though each call is now a single
+        // batched SREM. Give the pool room and a deep acquire queue to absorb it.
         RedisOptions opts = new RedisOptions()
                 .setConnectionString(config.redisUri())
-                .setMaxPoolSize(4)
-                .setMaxWaitingHandlers(512);
+                .setMaxPoolSize(16)
+                .setMaxPoolWaiting(1024)
+                .setMaxWaitingHandlers(2048);
         return RedisAPI.api(Redis.createClient(vertx, opts));
     }
 }

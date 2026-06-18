@@ -8,6 +8,7 @@ import com.tm.common.redis.ClaimGate;
 import com.tm.services.manager.dao.BookingDao;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.micrometer.core.instrument.Tags;
 import io.vertx.core.Future;
 
 import java.util.ArrayList;
@@ -160,21 +161,25 @@ public final class ClaimHandlerImpl implements ClaimHandler {
      * "confirmed" notification superseding this "failed" one.
      */
     private void onSettleFailed(String opportunityId, List<ClaimEvent> events, Throwable cause) {
+        String caller = callerOf(events);
         if (cause instanceof CallNotPermittedException) {
             // Circuit OPEN: PG is unhealthy (errors or >5s settles). Nothing was
             // attempted against PG, so don't release the Redis claim or notify drivers —
             // just count it and let the batch fail so the offset isn't committed and
             // Kafka redelivers once the breaker half-opens.
-            metrics.counter(METRIC, "circuit_open", instanceId).increment();
+            metrics.counter(METRIC, tags("circuit_open", caller)).increment();
             return;
         }
-        metrics.counter(METRIC, "error", instanceId).increment();
+        metrics.counter(METRIC, tags("error", caller)).increment();
+        List<String> drivers = new ArrayList<>(events.size());
         for (ClaimEvent e : events) {
-            gate.release(opportunityId, e.driverId())
-                    .onSuccess(v -> metrics.counter(RELEASE_METRIC, "ok", instanceId).increment())
-                    .onFailure(err -> metrics.counter(RELEASE_METRIC, "error", instanceId).increment());
-            notify("failed", e.serverReceivedAt());
+            drivers.add(e.driverId());
+            notify("failed", e.serverReceivedAt(), caller);
         }
+        // One SREM for the whole sub-batch instead of one round-trip per driver.
+        gate.releaseAll(opportunityId, drivers)
+                .onSuccess(v -> metrics.counter(RELEASE_METRIC, tags("ok", caller)).increment(drivers.size()))
+                .onFailure(err -> metrics.counter(RELEASE_METRIC, tags("error", caller)).increment(drivers.size()));
     }
 
     /**
@@ -186,10 +191,12 @@ public final class ClaimHandlerImpl implements ClaimHandler {
      * claimed_set from the original OK, SCARD is correct, no Redis action needed.
      */
     private void onSettled(List<ClaimEvent> events, List<ClaimStore.Outcome> outcomes) {
+        String caller = callerOf(events);
+        List<String> rejected = new ArrayList<>();
         for (int i = 0; i < events.size(); i++) {
             ClaimEvent e = events.get(i);
             ClaimStore.Outcome o = outcomes.get(i);
-            metrics.counter(METRIC, o.name().toLowerCase(), instanceId).increment();
+            metrics.counter(METRIC, tags(o.name().toLowerCase(), caller)).increment();
 
             String status;
             switch (o) {
@@ -197,22 +204,37 @@ public final class ClaimHandlerImpl implements ClaimHandler {
                 case DUPLICATE -> status = "duplicate";
                 default -> status = "failed";
             }
-            notify(status, e.serverReceivedAt());
+            notify(status, e.serverReceivedAt(), caller);
 
             if (o == ClaimStore.Outcome.REJECTED) {
-                gate.reject(e.opportunityId(), e.driverId())
-                        .onSuccess(v -> metrics.counter(RELEASE_METRIC, "ok", instanceId).increment())
-                        .onFailure(err -> metrics.counter(RELEASE_METRIC, "error", instanceId).increment());
+                rejected.add(e.driverId());
             }
+        }
+        // One SREM + one HINCRBY for all rejected drivers instead of two round-trips each.
+        if (!rejected.isEmpty()) {
+            gate.rejectAll(events.get(0).opportunityId(), rejected)
+                    .onSuccess(v -> metrics.counter(RELEASE_METRIC, tags("ok", caller)).increment(rejected.size()))
+                    .onFailure(err -> metrics.counter(RELEASE_METRIC, tags("error", caller)).increment(rejected.size()));
         }
     }
 
     /** TODO: push to driver app (MQTT/WS). Records e2e latency when serverReceivedAt > 0. */
-    private void notify(String status, long serverReceivedAt) {
-        metrics.counter(NOTIFY_METRIC, status).increment();
+    private void notify(String status, long serverReceivedAt, String caller) {
+        metrics.counter(NOTIFY_METRIC, Tags.of("result", status, "caller", caller)).increment();
         if (serverReceivedAt > 0) {
             long elapsedMs = System.currentTimeMillis() - serverReceivedAt;
-            metrics.timer(E2E_LATENCY, status).record(elapsedMs, TimeUnit.MILLISECONDS);
+            metrics.timer(E2E_LATENCY, Tags.of("result", status, "caller", caller))
+                    .record(elapsedMs, TimeUnit.MILLISECONDS);
         }
+    }
+
+    /** Tags every manager metric: result + this instance + the caller (scenario). */
+    private Tags tags(String result, String caller) {
+        return Tags.of("result", result, "instance", instanceId, "caller", caller);
+    }
+
+    /** Caller of a sub-batch — all events share an opportunity, hence one caller. */
+    private static String callerOf(List<ClaimEvent> events) {
+        return events.isEmpty() ? ClaimEvent.UNKNOWN_CALLER : events.get(0).callerId();
     }
 }

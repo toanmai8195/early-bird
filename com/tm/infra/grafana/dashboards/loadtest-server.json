@@ -20,6 +20,19 @@
         "type": "datasource",
         "query": "prometheus",
         "current": {}
+      },
+      {
+        "name": "caller",
+        "type": "query",
+        "label": "caller",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": { "query": "label_values(caller)", "refId": "caller" },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2,
+        "sort": 1
       }
     ]
   },
@@ -60,8 +73,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_api_claim_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_api_claim_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -89,8 +102,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_api_claim_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "{{result}}"
+          "expr": "booking_api_claim_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -130,8 +143,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(booking_api_claim_total{result=\"ok\"}[1m])",
-          "legendFormat": "published (api ok)"
+          "expr": "sum by (caller) (rate(booking_api_claim_total{result=\"ok\", caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} published (api ok)"
         }
       ]
     },
@@ -159,8 +172,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (instance, result) (rate(booking_consumer_handle_total[1m]))",
-          "legendFormat": "{{instance}} {{result}}"
+          "expr": "sum by (instance, result, caller) (rate(booking_consumer_handle_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{instance}} {{caller}} {{result}}"
         }
       ]
     },
@@ -200,8 +213,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_api_claim_total{result=~\"ok|full|dup|closed|throttled\"}[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_api_claim_total{result=~\"ok|full|dup|closed|throttled\", caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -229,8 +242,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (instance, result) (rate(booking_consumer_gate_release_total[1m]))",
-          "legendFormat": "{{instance}} {{result}}"
+          "expr": "sum by (instance, result, caller) (rate(booking_consumer_gate_release_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{instance}} {{caller}} {{result}}"
         }
       ]
     },
@@ -248,13 +261,13 @@
     },
     {
       "id": 10,
-      "title": "DAO Commit Rate per Instance (booking.dao.commit)",
+      "title": "PG settle — DRIVERS/s (booking.dao.commit)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Rate of PG settle operations per manager instance, broken down by outcome (committed/duplicate/rejected/error). Instance tag shows work distribution.",
+      "description": "DRIVER traffic: one increment per driver outcome (committed/duplicate/rejected/error), split by instance + caller. This is drivers/s actually settled. Pair with the CTE/s panel below: drivers/s ÷ CTE/s = effective sub-batch size.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -270,20 +283,20 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (instance, result) (rate(booking_dao_commit_total[1m]))",
-          "legendFormat": "{{instance}} {{result}}"
+          "expr": "sum by (instance, result, caller) (rate(booking_dao_commit_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{instance}} {{caller}} {{result}}"
         }
       ]
     },
     {
       "id": 11,
-      "title": "DAO Commit Latency P99 (booking.dao.commit.latency)",
+      "title": "PG settle latency P99 — per CTE (booking.dao.commit.latency)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "P99 CTE settle latency in PG. High values here indicate PG lock contention on hot opportunities.",
+      "description": "P99 settle latency, measured PER CTE (one sample per settleOpportunity() call), not per driver — split by caller. High values indicate PG lock contention on hot opportunities.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -299,20 +312,20 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_dao_commit_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "p99"
+          "expr": "booking_dao_commit_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} p99"
         }
       ]
     },
     {
       "id": 16,
-      "title": "PG Settle Rate per Batch (booking.pg.settle.batch)",
+      "title": "PG settle — CTE/s (booking.pg.settle.batch)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Số SQL round-trip settle/giây (mỗi lần settleOpportunity() = một sub-batch ≤ SETTLE_BATCH_SIZE = một row-lock), tách theo ok/error. So với DAO commit rate (per-driver): tỉ lệ ≈ batch size hiệu dụng. Trong pattern contended, đây là số lần chạm row opportunities hot.",
+      "description": "CTE traffic: one increment per settleOpportunity() call = one bulk CTE = one SQL round-trip (one row-lock), split by ok/error + caller. DRIVERS/s (panel above) ÷ CTE/s (this panel) = effective sub-batch size. In the contended pattern this is how often the hot opportunities row is touched.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -359,20 +372,20 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_pg_settle_batch_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_pg_settle_batch_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
     {
       "id": 17,
-      "title": "PG Settle Latency P99 per Batch (booking.pg.settle.latency)",
+      "title": "PG settle latency P99 — per CTE (booking.pg.settle.latency)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "P99 thời gian thuần thực thi CTE settle trong PG, đo THEO BATCH. Khi tune SETTLE_BATCH_SIZE lên, theo dõi giá trị này: tăng tuyến tính nhẹ là OK, phình super-linear = chi phí plan CTE trên VALUES list lớn vượt lợi ích gộp round-trip.",
+      "description": "P99 pure CTE execution time in PG, measured PER CTE (not per driver), split by caller. When tuning SETTLE_BATCH_SIZE up, watch this: slight linear growth is fine, super-linear blow-up = CTE planning cost on a large VALUES list outweighing the round-trip savings.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -388,8 +401,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_pg_settle_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "p99 / batch"
+          "expr": "booking_pg_settle_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} p99 / CTE"
         }
       ]
     },
@@ -417,8 +430,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (result) (rate(booking_consumer_notify_total[1m]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (result, caller) (rate(booking_consumer_notify_total{caller=~\"$caller\"}[1m]))",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -534,8 +547,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_api_claim_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "{{result}}"
+          "expr": "booking_api_claim_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     },
@@ -609,8 +622,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "booking_e2e_notify_latency_seconds{quantile=\"0.99\"}",
-          "legendFormat": "{{result}}"
+          "expr": "booking_e2e_notify_latency_seconds{quantile=\"0.99\", caller=~\"$caller\"}",
+          "legendFormat": "{{caller}} / {{result}}"
         }
       ]
     }

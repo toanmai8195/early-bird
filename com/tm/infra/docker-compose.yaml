@@ -129,9 +129,7 @@ services:
       - "--pg=postgres://earlybird:earlybird@postgres:5432/earlybird?sslmode=disable"
       - "--metrics-addr=:9411"
       - "--run=ramp"
-      - "--ramp-start-rate=100"
-      - "--ramp-step-size=50"
-      - "--ramp-steps=5"
+      - "--ramp-rates=10,15,20,50,80,100,120,150"
       - "--ramp-step-dur=2m"
       - "--ramp-cooldown=15s"
 
@@ -139,7 +137,13 @@ services:
     image: early-bird/loadtest-server:latest
     pull_policy: never
     profiles: ["loadtest"]
-    depends_on: [server]
+    # server lives in the "app" profile; when only "loadtest" is active (e.g.
+    # loadtest-pg-run) it is absent, so this dependency must be optional or
+    # Compose rejects the whole project as invalid.
+    depends_on:
+      server:
+        condition: service_started
+        required: false
     ports: ["9412:9412"]
     command:
       - "--server=http://server:8080"

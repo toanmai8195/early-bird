@@ -2,6 +2,8 @@ package com.tm.common.redis;
 
 import io.vertx.core.Future;
 
+import java.util.List;
+
 /**
  * Atomic early-reject gate. One Lua script per opportunity key
  * (claimed_set:{opp_id}) does counting + dedup in a single atomic op, so the
@@ -33,19 +35,29 @@ public interface ClaimGate {
 
     /**
      * Reverses a previously accepted claim, freeing the slot for other drivers.
-     * Used by the manager when the downstream PG settle fails entirely (nothing
-     * committed), so the Redis count stays consistent with PG and Kafka replay
-     * can re-admit the same drivers.
+     * Used by the server when a single claim's Kafka publish fails (the slot was
+     * SADD'd but the event never made it downstream), so the Redis count stays
+     * consistent.
      */
     Future<Void> release(String opportunityId, String driverId);
 
     /**
-     * Removes the driver from {@code claimed_set} AND decrements
-     * {@code opp_meta.capacity} by 1. Used when PG permanently rejects a driver
-     * (remaining was already 0 when the CTE ran). Unlike {@link #release}, which
-     * re-opens the slot for new drivers, {@code reject} closes it permanently so
-     * the gate returns FULL without letting in a replacement driver that PG would
-     * reject again.
+     * Batched {@link #release}: removes all {@code driverIds} from
+     * {@code claimed_set} in a single {@code SREM}. Used by the manager when a
+     * whole sub-batch's PG settle fails (nothing committed) — one round-trip
+     * instead of one per driver, so Redis stays consistent with PG and Kafka
+     * replay can re-admit the same drivers. No-op for an empty list.
      */
-    Future<Void> reject(String opportunityId, String driverId);
+    Future<Void> releaseAll(String opportunityId, List<String> driverIds);
+
+    /**
+     * Removes the drivers from {@code claimed_set} (one {@code SREM}) AND
+     * decrements {@code opp_meta.capacity} by {@code driverIds.size()} (one
+     * {@code HINCRBY}). Used when PG permanently rejects drivers (remaining was
+     * already 0 when the CTE ran). Unlike {@link #releaseAll}, which re-opens the
+     * slots for new drivers, {@code rejectAll} closes them permanently so the gate
+     * returns FULL without letting in replacement drivers that PG would reject
+     * again. No-op for an empty list.
+     */
+    Future<Void> rejectAll(String opportunityId, List<String> driverIds);
 }

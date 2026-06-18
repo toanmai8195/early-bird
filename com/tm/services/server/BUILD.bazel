@@ -15,6 +15,7 @@ java_library(
     deps = [
         "//com/tm/common/java/kafka",
         "//com/tm/common/java/metric",
+        "//com/tm/common/java/pg",
         "//com/tm/common/java/redis",
         "//com/tm/services/server/config",
         "//com/tm/services/server/dao",
